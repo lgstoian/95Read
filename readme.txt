@@ -1,4 +1,3 @@
-# 95Read
 95read
 A lightweight, Turbo C 2.0–based text viewer for the HP 95LX palmtop. 95read displays plain‐text files in fixed 16 × 40 pages, supports forward/back paging, and saves your last‐read position.
 
