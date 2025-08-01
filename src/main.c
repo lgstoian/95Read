@@ -1,5 +1,5 @@
 #include "95read.h"
-#include <conio.h>   /* for clrscr() */
+#include <conio.h>   /* for clrscr(), gotoxy(), putch() */
 
 int main(int argc, char **argv) {
     ReaderState rs;
@@ -9,7 +9,7 @@ int main(int argc, char **argv) {
     char        cmd;
 
     if (argc < 2) {
-        printf("Usage: 95read <file.txt>\r\n");
+        puts("Usage: 95read <file.txt>");
         return 1;
     }
 
@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
         /* Load up to PAGE_BUF_SIZE bytes from file */
         bytes_read = read_page(&rs, buffer);
         if (bytes_read <= 0) {
-            break;  /* EOF */
+            break;  /* EOF or error */
         }
 
         /* Display and get actual byte‐count drawn */
@@ -35,25 +35,25 @@ int main(int argc, char **argv) {
 
         /* Wait for user command */
         cmd = ui_get_cmd();
-
         if (cmd == KEY_QUIT) {
             break;
         }
         else if (cmd == KEY_PREV_PAGE) {
             if (rs.hist_count > 1) {
-                /* Drop current then step back to previous */
-                rs.hist_count--;
-                rs.hist_count--;
+                /* Step back one page */
+                rs.hist_count -= 2;
                 rs.offset = rs.history[rs.hist_count];
-            }
-            else {
+            } else {
                 /* Already at first page */
-                rs.offset = 0;
                 rs.hist_count = 0;
+                rs.offset = 0;
             }
         }
         else {  /* KEY_NEXT_PAGE */
             rs.offset += bytes_used;
+            if (rs.offset > rs.file_size) {
+                rs.offset = rs.file_size;
+            }
         }
     }
 

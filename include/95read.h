@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>   /* now using memcpy and strlen */
 
 /* Screen dimensions */
 #define SCREEN_LINES   16
@@ -20,8 +21,9 @@
 #define KEY_QUIT       'C'
 
 /* How many pages of history to remember */
-#define MAX_HISTORY    128
+#define MAX_HISTORY    1024    /* was 128—now can remember over 1000 pages */
 
+/* Reader state stored across modules */
 typedef struct {
     FILE *fp;                   /* open text file */
     long  file_size;            /* total bytes in file */
@@ -50,5 +52,3 @@ void save_progress(const ReaderState *rs);
 void load_progress(ReaderState *rs);
 
 #endif /* READ95_H */
-
-
