@@ -1,77 +1,84 @@
 #include "95read.h"
-#include <conio.h>   /* for clrscr(), gotoxy(), putch() */
+#include <conio.h>    /* for clrscr(), gotoxy(), putch() */
+#include <stddef.h>   /* for size_t */
 
 int display_page(const char *buf) {
-    const char *p = buf;
+    const unsigned char *p = (const unsigned char *)buf;
     int row = 1, col = 1;
-    char ch;
-    const int TAB_WIDTH = 8;
+    unsigned char ch;
+    int bytes = 0;
 
     clrscr();
     gotoxy(1, 1);
 
-    while (row <= SCREEN_LINES && (ch = *p) != '\0') {
+    /* Render characters until we hit the bottom of the screen or a NUL */
+    while (row <= cfg.screen_lines && (ch = *p) != '\0') {
         p++;
+        bytes++;
 
-        /* Handle form-feed: clear & reset */
-        if (ch == '\f') {
+        switch (ch) {
+        case '\b':  /* backspace: erase one character */
+            if (col > 1) {
+                col--;
+                gotoxy(col, row);
+                putch(' ');
+                gotoxy(col, row);
+            }
+            break;
+
+        case '\f':  /* form feed: clear and reset */
             clrscr();
-            row = col = 1;
+            row = 1;
+            col = 1;
             gotoxy(1, 1);
-            continue;
-        }
+            break;
 
-        /* Skip carriage returns */
-        if (ch == '\r') {
-            continue;
-        }
+        case '\r':  /* ignore carriage return */
+            break;
 
-        /* Expand tabs */
-        if (ch == '\t') {
-            int spaces = TAB_WIDTH - (col - 1) % TAB_WIDTH;
-            while (spaces-- > 0 && row <= SCREEN_LINES) {
-                if (col > SCREEN_COLS) {
+        case '\t': {  /* expand tab */
+            int spaces = cfg.tab_width - ((col - 1) % cfg.tab_width);
+            while (spaces-- > 0 && row <= cfg.screen_lines) {
+                if (col > cfg.screen_cols) {
                     row++;
                     col = 1;
-                    if (row > SCREEN_LINES) break;
-                    gotoxy(1, row);
+                    if (row > cfg.screen_lines) break;
+                    gotoxy(col, row);
                 }
                 putch(' ');
                 col++;
             }
-            continue;
+            break;
         }
 
-        /* Newline: move to next line */
-        if (ch == '\n') {
+        case '\n':  /* newline: move to start of next line */
             row++;
             col = 1;
-            if (row > SCREEN_LINES) break;
+            if (row > cfg.screen_lines) break;
             gotoxy(1, row);
-            continue;
-        }
+            break;
 
-        /* Wrap on column overflow */
-        if (col > SCREEN_COLS) {
-            row++;
-            col = 1;
-            if (row > SCREEN_LINES) break;
-            gotoxy(1, row);
+        default:    /* printable character */
+            if (col > cfg.screen_cols) {
+                row++;
+                col = 1;
+                if (row > cfg.screen_lines) break;
+                gotoxy(1, row);
+            }
+            putch(ch);
+            col++;
+            break;
         }
-
-        /* Draw character */
-        putch(ch);
-        col++;
     }
 
-    /* Clear any leftover lines for a clean page */
-    while (++row <= SCREEN_LINES) {
+    /* Clear any leftover lines below the last rendered row */
+    while (++row <= cfg.screen_lines) {
+        int c2;
         gotoxy(1, row);
-        for (col = 1; col <= SCREEN_COLS; col++) {
+        for (c2 = 0; c2 < cfg.screen_cols; c2++) {
             putch(' ');
         }
     }
 
-    /* Return how many bytes we advanced in the buffer */
-    return (int)(p - buf);
+    return bytes;
 }

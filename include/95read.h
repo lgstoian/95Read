@@ -1,54 +1,91 @@
 #ifndef READ95_H
 #define READ95_H
 
+/*--------------------------------------------------------------------
+  Standard headers
+--------------------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>   /* now using memcpy and strlen */
+#include <string.h>
 
-/* Screen dimensions */
-#define SCREEN_LINES   16
-#define SCREEN_COLS    40
+/*--------------------------------------------------------------------
+  Configurable defaults (override in config.h)
+--------------------------------------------------------------------*/
+#ifndef SCREEN_LINES
+  #define SCREEN_LINES   16
+#endif
 
-/* Maximum bytes per page buffer (include line breaks) */
-#define PAGE_BUF_SIZE  ((SCREEN_COLS + 2) * SCREEN_LINES)
+#ifndef SCREEN_COLS
+  #define SCREEN_COLS    40
+#endif
 
-/* Save-file extension */
-#define PROG_EXT       ".95r"
+/* +2 per line for CR+LF, +1 for trailing NUL */
+#define PAGE_BUF_SIZE   ((SCREEN_COLS + 2) * SCREEN_LINES + 1)
 
-/* Key commands */
-#define KEY_NEXT_PAGE  'N'
-#define KEY_PREV_PAGE  'P'
-#define KEY_QUIT       'C'
+#ifndef PROG_EXT
+  #define PROG_EXT       ".95r"
+#endif
 
-/* How many pages of history to remember */
-#define MAX_HISTORY    1024    /* was 128—now can remember over 1000 pages */
+#ifndef KEY_NEXT_PAGE
+  #define KEY_NEXT_PAGE  'N'
+#endif
+#ifndef KEY_PREV_PAGE
+  #define KEY_PREV_PAGE  'P'
+#endif
+#ifndef KEY_QUIT
+  #define KEY_QUIT       'C'
+#endif
 
-/* Reader state stored across modules */
+/* accept lowercase too ('a'–'A' == 32) */
+#define IS_KEY_NEXT(c)  ( (c) == KEY_NEXT_PAGE  || (c) == (KEY_NEXT_PAGE  + 32) )
+#define IS_KEY_PREV(c)  ( (c) == KEY_PREV_PAGE  || (c) == (KEY_PREV_PAGE  + 32) )
+#define IS_KEY_QUIT(c)  ( (c) == KEY_QUIT       || (c) == (KEY_QUIT       + 32) )
+
+/*--------------------------------------------------------------------
+  User overrides
+--------------------------------------------------------------------*/
+#include "config.h"
+
+/*--------------------------------------------------------------------
+  History stack initial size (tweak if you need deeper back/forward)
+--------------------------------------------------------------------*/
+#define HIST_INIT_CAP   16
+
+/*--------------------------------------------------------------------
+  Reader state shared across modules
+--------------------------------------------------------------------*/
 typedef struct {
-    FILE *fp;                   /* open text file */
+    FILE *fp;                   /* open input file */
     long  file_size;            /* total bytes in file */
-    long  offset;               /* current byte offset in file */
+    long  offset;               /* current page-start offset */
 
-    long  history[MAX_HISTORY]; /* page-start offsets */
-    int   hist_count;           /* how many entries are valid */
+    long *history;              /* array of past offsets */
+    int   hist_count;           /* how many saved */
+    int   hist_capacity;        /* how many allocated */
 
-    /* Base name for progress file (“foo” → “foo.95r”) */
-    char  progfile_base[80];
+    char  progfile_base[80];    /* base filename for .95r file */
 } ReaderState;
+
+/*--------------------------------------------------------------------
+  Module interfaces
+--------------------------------------------------------------------*/
 
 /* fileio.c */
 void io_init(ReaderState *rs, const char *path);
 int  read_page(ReaderState *rs, char *buf);
 
 /* display.c */
-/* Returns how many bytes were consumed (displayed) from buf */
 int  display_page(const char *buf);
 
 /* ui.c */
 char ui_get_cmd(void);
 
 /* progress.c */
-void save_progress(const ReaderState *rs);
 void load_progress(ReaderState *rs);
+void save_progress(const ReaderState *rs);
+
+/* config.c */
+extern Config cfg;
+void load_config(void);
 
 #endif /* READ95_H */
