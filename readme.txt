@@ -88,5 +88,5 @@ Notes and limits
     • HP 95LX 40×16 text mode is assumed; effective screen area may be adjusted via config, but buffers cap at compile-time limits to keep memory minimal.
     • End (E) navigates near the end by backing up one page from EOF, ensuring the last screen has content.
     • History is dynamic but capped when saved to keep .95r files small; duplicates are removed.
-If you want, I can also provide a ready-to-run build.bat tailored to your folder layout, or a minimal test text file to validate the encoding handling on-device.
+
 

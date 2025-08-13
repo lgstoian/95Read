@@ -40,9 +40,6 @@ static unsigned short csum16(const unsigned char *buf, size_t n) {
     unsigned long s = 0;
     size_t i;
     for (i = 0; i < n; ++i) s += buf[i];
-    /* fold to 16 bits */
-    s = (s & 0xFFFFUL) + (s >> 16);
-    s = (s & 0xFFFFUL) + (s >> 16);
     return (unsigned short)s;
 }
 
