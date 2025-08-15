@@ -57,32 +57,39 @@
 #define PAGE_BUF_SIZE   ((SCREEN_COLS + 2) * SCREEN_LINES + 1)
 
 /*--------------------------------------------------------------------
+  Helper to uppercase a char (ASCII only)
+--------------------------------------------------------------------*/
+#define TO_UPPER(ch) (((ch) >= 'a' && (ch) <= 'z') ? ((ch) - ('a' - 'A')) : (ch))
+
+/*--------------------------------------------------------------------
   Key helpers
   - Accept compile-time defaults (KEY_*).
   - Accept runtime-configured keys from cfg where applicable.
-  - Accept lowercase too ('a' - 'A' == 32).
+  - Input is uppercased for letters in ui_get_cmd, so no lowercase checks needed.
+  - For configured keys, uppercase them for comparison to handle mixed cases.
   - Quit also accepts ESC (27) as a convenience.
+  - Note: For best compatibility, use uppercase letters in config file.
 --------------------------------------------------------------------*/
 #define IS_KEY_NEXT(c) ( \
-    ((c) == KEY_NEXT_PAGE) || ((c) == (KEY_NEXT_PAGE + 32)) || \
-    ((c) == cfg.key_next_page) || ((c) == (cfg.key_next_page + 32)) \
+    ((c) == KEY_NEXT_PAGE) || \
+    ((c) == TO_UPPER(cfg.key_next_page)) \
 )
 
 #define IS_KEY_PREV(c) ( \
-    ((c) == KEY_PREV_PAGE) || ((c) == (KEY_PREV_PAGE + 32)) || \
-    ((c) == cfg.key_prev_page) || ((c) == (cfg.key_prev_page + 32)) \
+    ((c) == KEY_PREV_PAGE) || \
+    ((c) == TO_UPPER(cfg.key_prev_page)) \
 )
 
 #define IS_KEY_QUIT(c) ( \
-    ((c) == KEY_QUIT) || ((c) == (KEY_QUIT + 32)) || \
-    ((c) == cfg.key_quit) || ((c) == (cfg.key_quit + 32)) || \
+    ((c) == KEY_QUIT) || \
+    ((c) == TO_UPPER(cfg.key_quit)) || \
     ((c) == 27) \
 )
 
 /* compile-time only helpers for begin/end/goto */
-#define IS_KEY_BEGIN(c) ( ((c) == KEY_BEGIN) || ((c) == (KEY_BEGIN + 32)) )
-#define IS_KEY_ENDK(c)  ( ((c) == KEY_END)   || ((c) == (KEY_END + 32)) )
-#define IS_KEY_GOTO(c)  ( ((c) == KEY_GOTO)  || ((c) == (KEY_GOTO + 32)) )
+#define IS_KEY_BEGIN(c) ( ((c) == KEY_BEGIN) )
+#define IS_KEY_END(c)  ( ((c) == KEY_END) )
+#define IS_KEY_GOTO(c)  ( ((c) == KEY_GOTO) )
 
 /*--------------------------------------------------------------------
   Effective dimensions if needed by other modules:

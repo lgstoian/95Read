@@ -104,7 +104,6 @@ int main(int argc, char **argv) {
     ReaderState rs;
     char        buffer[PAGE_BUF_SIZE];
     int         bytes_read;
-    int         bytes_used;
     char        cmd;
     int         new_cap;
     long       *new_hist;
@@ -151,7 +150,7 @@ int main(int argc, char **argv) {
             break;
         }
 
-        bytes_used = display_page(buffer);
+        display_page(buffer);
 
         /* show footer with % and key help on last line */
         draw_status(&rs);
@@ -166,9 +165,8 @@ int main(int argc, char **argv) {
         /* previous page (go back to prior saved offset) */
         else if (IS_KEY_PREV(cmd)) {
             if (rs.hist_count > 1) {
-                /* step back two: current push + previous -> land on previous */
                 rs.hist_count -= 2;
-                if (rs.hist_count < 0) rs.hist_count = 0; /* safety */
+                if (rs.hist_count < 0) rs.hist_count = 0;
                 rs.offset = rs.history[rs.hist_count];
             } else {
                 rs.hist_count = 0;
@@ -176,12 +174,12 @@ int main(int argc, char **argv) {
             }
         }
         /* jump to beginning of file */
-        else if (IS_KEY_BEGIN(cmd)) {
+        else if (cmd == 'B') {
             rs.offset = 0L;
         }
         /* jump near end of file (best-effort without touching fileio) */
-        else if (IS_KEY_ENDK(cmd)) {
-            long back = (long)PAGE_BUF_SIZE;
+        else if (cmd == 'E') {
+            long back = (long)((cfg.screen_lines - 1) * cfg.screen_cols);
             if (rs.file_size > back) {
                 rs.offset = rs.file_size - back;
             } else {
@@ -189,7 +187,7 @@ int main(int argc, char **argv) {
             }
         }
         /* prompt and jump to percentage of file */
-        else if (IS_KEY_GOTO(cmd)) {
+        else if (cmd == 'G') {
             int row;
             int pct;
             long target;
@@ -206,7 +204,6 @@ int main(int argc, char **argv) {
 
             if (rs.file_size > 0L) {
                 target = (long)((rs.file_size * (long)pct) / 100L);
-                /* keep within file range */
                 if (target < 0L) target = 0L;
                 if (target > rs.file_size) target = rs.file_size;
                 rs.offset = target;
@@ -216,14 +213,11 @@ int main(int argc, char **argv) {
         }
         /* next page (default) */
         else if (IS_KEY_NEXT(cmd)) {
-            rs.offset += (long)bytes_used;
-            if (rs.offset > rs.file_size) {
-                rs.offset = rs.file_size;
-            }
+            /* nothing; offset already advanced by read_page */
         }
-        /* ignore unknown keys: keep current offset so the same page redraws */
+        /* ignore unknown keys: reset offset to redraw current page */
         else {
-            /* no change to rs.offset */
+            rs.offset = rs.history[rs.hist_count - 1];
         }
     }
 

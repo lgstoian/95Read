@@ -131,12 +131,21 @@ static int parse_quoted_char(const char *val) {
     if (quote != '\'' && quote != '\"') return -1;
 
     p = val + 1;
+    if (*p == '\0') return -1;
+
     if (*p == '\\') {
         ++p;
+        if (*p == '\0') return -1;
         out = parse_escape_char(p);
+        ++p;
     } else {
         out = (unsigned char)(*p);
+        ++p;
     }
+
+    if (*p != quote) return -1;
+    if (*(p + 1) != '\0') return -1; /* nothing after closing quote */
+
     return out;
 }
 
@@ -190,8 +199,10 @@ static int parse_key_token(const char *val) {
         if (strcmp(buf, "BS") == 0)    return 8;
         if (strcmp(buf, "DEL") == 0)   return 127;
 
-        /* Fallback: first character */
-        return (unsigned char)val[0];
+        /* Fallback: first character, only if single char */
+        if (strlen(val) == 1) {
+            return (unsigned char)val[0];
+        }
     }
 
     return -1;

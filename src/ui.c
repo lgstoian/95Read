@@ -4,12 +4,21 @@
 /*
   Keys:
     SPACE  -> next page
+    ENTER  -> next page
+    BS     -> prev page
     ESC    -> quit
-    N/P/C  -> next/prev/quit (or runtime-configured values)
+    N/P/C  -> next/prev/quit (or runtime-configured values, case-insensitive)
     B/E    -> begin/end
     G      -> goto percentage prompt
-  Ignores all other keys (including extended arrows).
+    Arrows/Home/End/PgUp/PgDn -> intuitive navigation
+  Ignores all other keys (including other extended keys).
 */
+
+static unsigned char my_toupper(unsigned char c) {
+    if (c >= 'a' && c <= 'z') return c - ('a' - 'A');
+    return c;
+}
+
 char ui_get_cmd(void) {
     int c;  /* must be int to catch all getch() return values */
 
@@ -17,44 +26,65 @@ char ui_get_cmd(void) {
         /* block here until a key is pressed */
         c = getch();
 
-        /* handle extended-key prefix (0 or 0xE0), discard the scan code */
+        /* handle extended-key prefix (0 or 0xE0) */
         if (c == 0 || c == 0xE0) {
-            (void)getch();
-            continue;
+            c = getch();  /* get scan code */
+            switch (c) {
+                case 71: return 'B';                /* Home -> begin */
+                case 79: return 'E';                /* End  -> end   */
+                case 73: return cfg.key_prev_page;  /* PgUp -> prev  */
+                case 81: return cfg.key_next_page; /* PgDn -> next  */
+                case 72:                            /* Up    -> prev */
+                case 75:                            /* Left  -> prev */
+                    return cfg.key_prev_page;
+                case 80:                            /* Down  -> next */
+                case 77:                            /* Right -> next */
+                    return cfg.key_next_page;
+                default:
+                    continue;  /* ignore other extended */
+            }
         }
 
-        /* normalize lowercase letters to uppercase */
-        if (c >= 'a' && c <= 'z') {
-            c -= ('a' - 'A');
+        /* ENTER -> next page */
+        if (c == 13) {
+            return cfg.key_next_page;
         }
 
-        /* space -> next page (map to configured "next" so main's checks pass) */
+        /* BACKSPACE -> prev page */
+        if (c == 8) {
+            return cfg.key_prev_page;
+        }
+
+        /* space -> next page */
         if (c == ' ') {
             return cfg.key_next_page;
         }
 
-        /* ESC -> quit (main also recognizes ESC explicitly) */
+        /* ESC -> quit */
         if (c == 27) {
             return cfg.key_quit;
         }
 
-        /* user-configured keys for next/prev/quit */
-        if ((unsigned char)c == (unsigned char)cfg.key_next_page ||
-            (unsigned char)c == (unsigned char)cfg.key_prev_page ||
-            (unsigned char)c == (unsigned char)cfg.key_quit)
-        {
-            return (char)c;
+        /* user-configured keys for next/prev/quit (case-insensitive) */
+        if (my_toupper((unsigned char)c) == my_toupper((unsigned char)cfg.key_next_page)) {
+            return cfg.key_next_page;
+        }
+        if (my_toupper((unsigned char)c) == my_toupper((unsigned char)cfg.key_prev_page)) {
+            return cfg.key_prev_page;
+        }
+        if (my_toupper((unsigned char)c) == my_toupper((unsigned char)cfg.key_quit)) {
+            return cfg.key_quit;
         }
 
-        /* compile-time extra commands: Begin/End/Goto */
-        if (c == KEY_BEGIN || c == (KEY_BEGIN + 32)) {
-            return (char)KEY_BEGIN;
+        /* compile-time extra commands: Begin/End/Goto (case-insensitive) */
+        if (my_toupper((unsigned char)c) == KEY_BEGIN) {
+            return KEY_BEGIN;
         }
-        if (c == KEY_END || c == (KEY_END + 32)) {
-            return (char)KEY_END;
+        if (my_toupper((unsigned char)c) == KEY_END) {
+            return KEY_END;
         }
-        if (c == KEY_GOTO || c == (KEY_GOTO + 32)) {
-            return (char)KEY_GOTO;
+        if (my_toupper((unsigned char)c) == KEY_GOTO) {
+            return KEY_GOTO;
         }
 
         /* otherwise ignore and loop */

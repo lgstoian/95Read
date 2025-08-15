@@ -31,15 +31,25 @@
 #endif
 
 /*--------------------------------------------------------------------
+  Minimum and maximum values for configuration clamping
+--------------------------------------------------------------------*/
+#define MIN_SCREEN_LINES   4
+#define MAX_SCREEN_LINES   100
+#define MIN_SCREEN_COLS    4
+#define MAX_SCREEN_COLS    200
+#define MIN_TAB_WIDTH      1
+#define MAX_TAB_WIDTH      16
+
+/*--------------------------------------------------------------------
   In-memory configuration structure
 --------------------------------------------------------------------*/
 typedef struct {
     int  screen_lines;      /* lines per page (overrides SCREEN_LINES) */
     int  screen_cols;       /* cols per line  (overrides SCREEN_COLS) */
     int  tab_width;         /* number of spaces per tab */
-    char key_next_page;     /* command key to advance page */
-    char key_prev_page;     /* command key to go back */
-    char key_quit;          /* command key to exit */
+    unsigned char key_next_page;     /* command key to advance page */
+    unsigned char key_prev_page;     /* command key to go back */
+    unsigned char key_quit;          /* command key to exit */
     char prog_ext[MAX_PROG_EXT_LEN + 1];
                             /* user-specified save-file extension */
 } Config;
@@ -52,9 +62,9 @@ extern Config cfg;
   If missing, writes a new one filled with defaults (unless
   CFG_SKIP_WRITE_DEFAULT is set to 1).
   On load, invalid or out-of-range values are clamped to safe bounds:
-    4 <= screen_lines <= 100
-    4 <= screen_cols  <= 200
-    1 <= tab_width     <= 16
+    MIN_SCREEN_LINES <= screen_lines <= MAX_SCREEN_LINES
+    MIN_SCREEN_COLS  <= screen_cols  <= MAX_SCREEN_COLS
+    MIN_TAB_WIDTH    <= tab_width    <= MAX_TAB_WIDTH
   Keys may be a single character, a name (ESC, SPACE, ENTER, TAB,
   BS, DEL), a quoted character (e.g., 'N' or '\n'), decimal (27),
   or hex (0xNN). Extension strings are length-limited and should
@@ -65,7 +75,7 @@ void load_config(void);
 /*--------------------------------------------------------------------
   Compile-time sanity checks (ANSI C89-friendly)
 --------------------------------------------------------------------*/
-#if sizeof(CONFIG_FILE) > 12
+#if sizeof(CONFIG_FILE) > 13
   #error "CONFIG_FILE must fit 8.3 (max 8 chars name + dot + 3 chars ext)"
 #endif
 

@@ -1,19 +1,24 @@
 /*================================================================
-  95read_io.c - text-page reader for HP 95LX
+  fileio.c - text-page reader for HP 95LX with word wrapping
   ---------------------------------------------------------------
   - Builds with Borland Turbo C 2.01 (small model, 8088 code).
   - Needs only the public "95read.h".
-  - New in this version
-      - Proper UTF-8 decoder (1-, 2-, 3-byte sequences)
-      - ASCII transliteration of the Latin-1 + Latin-Extended-A
-        block (Central-European accents) instead of the old '?'
-      - Same low RAM footprint, no dynamic allocation,
-        same external API - other source files stay untouched.
+  - Improvements in this version:
+      - Proper word wrapping to prevent cutting words at the end of display lines.
+      - Assumes display width of 40 characters and 16 lines per page (HP 95LX specs).
+      - Formatting inserts '\n' at word boundaries (spaces) where possible.
+      - Handles long words by hard wrapping if necessary.
+      - Respects existing '\n' in the text for paragraph breaks.
+      - Maintains low RAM footprint with static buffers, no dynamic allocation.
+      - Encoding detection and transliteration unchanged but integrated with wrapping.
+      - Leftover raw bytes saved statically for sequential page reads.
 ================================================================*/
 #include "95read.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>     /* strrchr, memcpy, strlen */
+
+#define RAW_BUF_SIZE 2048  /* Sufficient for UTF-8 expansion and a full page */
 
 /*----------------------------------------------------------------
   CP-1250 -> ASCII lookup table (0x80-0xFF)
@@ -35,6 +40,17 @@ static const unsigned char cp1250_to_ascii[128] = {
 ----------------------------------------------------------------*/
 static unsigned char utf8_edge[4];
 static int            utf8_edge_len = 0;
+
+/*----------------------------------------------------------------
+  Leftover raw buffer - keeps unused full sequences for next page
+----------------------------------------------------------------*/
+static unsigned char leftover[RAW_BUF_SIZE];
+static int           leftover_len = 0;
+
+/*----------------------------------------------------------------
+  Track the expected next offset to detect jumps and clear leftovers
+----------------------------------------------------------------*/
+static long next_expected = -1L;
 
 /*----------------------------------------------------------------
   Prepend saved leading bytes (if any) to freshly read text
@@ -139,8 +155,6 @@ static unsigned char unicode_to_ascii(unsigned int cp) {
     if (cp < 0x80U)                 /* 7-bit ASCII              */
         return (unsigned char)cp;
 
-    /* Removed incorrect mapping: do not use CP-1250 table for Unicode Latin-1 range */
-
     {   /* linear scan - table is small */
         int i;
         for (i = 0; i < (int)(sizeof(latin1_ext_a)/sizeof(UMap)); ++i)
@@ -148,60 +162,6 @@ static unsigned char unicode_to_ascii(unsigned int cp) {
                 return latin1_ext_a[i].ascii;
     }
     return '?';                                   /* unknown char */
-}
-
-/*----------------------------------------------------------------
-  UTF-8 -> ASCII conversion (in place, transliteration aware)
-----------------------------------------------------------------*/
-static void utf8_to_ascii_inplace(char *buf) {
-    unsigned char *src = (unsigned char*)buf;
-    unsigned char *dst = (unsigned char*)buf;
-    int len = strlen((char*)buf); /* Get buffer length */
-
-    while (*src && src < (unsigned char*)buf + len) {
-        unsigned char lead = *src;
-
-        if (lead < 0x80U) {
-            *dst++ = lead;
-            ++src;
-        } else {
-            int seq_len = utf8_lead_len(lead);
-            unsigned int cp = 0;
-
-            if (seq_len == 2 && src + 1 < (unsigned char*)buf + len &&
-                (src[1] & 0xC0U) == 0x80U) {
-                cp = ((lead & 0x1FU) << 6) | (src[1] & 0x3FU);
-                src += 2;
-            } else if (seq_len == 3 && src + 2 < (unsigned char*)buf + len &&
-                       (src[1] & 0xC0U) == 0x80U && (src[2] & 0xC0U) == 0x80U) {
-                cp = ((lead & 0x0FU) << 12) | ((src[1] & 0x3FU) << 6) | (src[2] & 0x3FU);
-                src += 3;
-            } else {
-                *dst++ = '?'; /* Output '?' for malformed sequences */
-                ++src; /* Skip malformed byte */
-                continue;
-            }
-            *dst++ = (char)unicode_to_ascii(cp);
-        }
-    }
-    *dst = '\0';
-}
-
-/*----------------------------------------------------------------
-  CP-1250 -> ASCII  (unchanged)
-----------------------------------------------------------------*/
-static void cp1250_to_ascii_inplace(char *buf) {
-    unsigned char *src = (unsigned char*)buf;
-    unsigned char *dst = (unsigned char*)buf;
-
-    while (*src) {
-        unsigned char c = *src++;
-        if (c < 0x80U)
-            *dst++ = (char)c;
-        else
-            *dst++ = (char)cp1250_to_ascii[c - 128];
-    }
-    *dst = '\0';
 }
 
 /*----------------------------------------------------------------
@@ -277,57 +237,181 @@ void io_init(ReaderState *rs, const char *path) {
         printf("Warning: \"%s\" is empty\n", path);
 
     utf8_edge_len = 0;
+    leftover_len = 0;
+    next_expected = -1L;
 }
 
 /*----------------------------------------------------------------
-  read_page - public API, now with full UTF-8 transliteration
+  read_page - public API, now with word wrapping and full page formatting
 ----------------------------------------------------------------*/
 int read_page(ReaderState *rs, char *buf) {
-    int n, new_bytes, cap = PAGE_BUF_SIZE, enc;
+    static char raw_buf[RAW_BUF_SIZE];
+    int raw_n = 0;
+    int enc;
+    int raw_pos = 0;
+    long raw_used = 0;
+    char *out = buf;
+    int out_len = 0;
+    int line_len = 0;
+    int num_lines = 0;
+    int is_eof = 0;
+    int to_read;
+    int read_bytes;
+    char ch;
+    unsigned int cp;
+    int seq_len;
+    unsigned char lead;
+    char *line_start;
+    char *last_space;
+    char *p;
+    int line_width = cfg.screen_cols;
+    int page_lines = cfg.screen_lines - 1;
 
-    if (rs->offset >= rs->file_size && utf8_edge_len == 0) return 0;
+    if (rs->offset >= rs->file_size && utf8_edge_len == 0 && leftover_len == 0) return 0;
 
-    if (rs->offset >= rs->file_size && utf8_edge_len > 0) {
-        /* Process remaining edge if file is exhausted */
-        memcpy(buf, utf8_edge, utf8_edge_len);
-        n = utf8_edge_len;
-        buf[n] = '\0';
+    /* Clear leftovers if not sequential forward read */
+    if (next_expected != rs->offset) {
+        leftover_len = 0;
         utf8_edge_len = 0;
-        enc = 0; /* Assume UTF-8 for remaining edge */
-    } else {
-        if (fseek(rs->fp, rs->offset, SEEK_SET) != 0) {
+    }
+
+    /* Load leftover from previous page */
+    if (leftover_len > 0) {
+        memcpy(raw_buf, leftover, leftover_len);
+        raw_n = leftover_len;
+        leftover_len = 0;
+    }
+
+    /* Read more if needed and possible */
+    to_read = RAW_BUF_SIZE - 1 - raw_n;
+    if (to_read > 0 && rs->offset < rs->file_size) {
+        if (fseek(rs->fp, rs->offset + raw_n, SEEK_SET) != 0) {
             printf("Seek error at %ld\n", rs->offset);
             return 0;
         }
-
-        new_bytes = (int)fread(buf, 1, (size_t)(cap - 1), rs->fp);
-        buf[new_bytes] = '\0';
-
-        n = prepend_utf8_edge(buf, new_bytes, cap);
-        enc = detect_encoding(buf, n);
-
-        if (enc == 0) {
-            n = clip_and_save_utf8_trailer(buf, n);
-        }
-
-        /* Skip UTF-8 BOM if present at the start of the file */
-        if (enc == 0 && rs->offset == 0 && n >= 3 &&
-            (unsigned char)buf[0] == 0xEF &&
-            (unsigned char)buf[1] == 0xBB &&
-            (unsigned char)buf[2] == 0xBF) {
-            memmove(buf, buf + 3, n - 3);
-            n -= 3;
-            buf[n] = '\0';
-        }
-
-        if (n < cap - 1 && ferror(rs->fp))
+        read_bytes = (int)fread(raw_buf + raw_n, 1, (size_t)to_read, rs->fp);
+        if (read_bytes < to_read && ferror(rs->fp)) {
             printf("Read error at %ld\n", rs->offset);
+        }
+        raw_n += read_bytes;
     }
 
-    if (enc == 0)       utf8_to_ascii_inplace(buf);
-    else if (enc == 1)  cp1250_to_ascii_inplace(buf);
+    raw_buf[raw_n] = '\0';
 
-    rs->offset += new_bytes; /* Advance by newly read bytes */
+    /* Prepend UTF-8 edge if any */
+    raw_n = prepend_utf8_edge(raw_buf, raw_n, RAW_BUF_SIZE);
 
-    return (int)strlen(buf); /* Return the length of the processed output */
+    /* Detect encoding */
+    enc = detect_encoding(raw_buf, raw_n);
+
+    /* Clip UTF-8 trailer if UTF-8 */
+    if (enc == 0 && rs->offset + raw_n < rs->file_size) {
+        raw_n = clip_and_save_utf8_trailer(raw_buf, raw_n);
+    }
+
+    /* Skip UTF-8 BOM at file start */
+    if (enc == 0 && rs->offset == 0 && raw_n >= 3 &&
+        (unsigned char)raw_buf[0] == 0xEF &&
+        (unsigned char)raw_buf[1] == 0xBB &&
+        (unsigned char)raw_buf[2] == 0xBF) {
+        memmove(raw_buf, raw_buf + 3, raw_n - 3);
+        raw_n -= 3;
+    }
+
+    raw_used = 0;  /* Reset to track actual used bytes */
+
+    /* Build formatted page with word wrapping */
+    while (num_lines < page_lines && out_len < PAGE_BUF_SIZE - 1 && !is_eof) {
+        seq_len = 1;
+        cp = 0;
+        ch = 0;
+
+        if (raw_pos >= raw_n) {
+            is_eof = 1;
+            continue;
+        }
+
+        lead = (unsigned char)raw_buf[raw_pos];
+
+        if (enc == 0) {  /* UTF-8 */
+            seq_len = utf8_lead_len(lead);
+            if (seq_len == 1) {
+                cp = lead;
+            } else if (seq_len == 2 && raw_pos + 1 < raw_n) {
+                cp = ((lead & 0x1FU) << 6) | ((unsigned char)raw_buf[raw_pos + 1] & 0x3FU);
+            } else if (seq_len == 3 && raw_pos + 2 < raw_n) {
+                cp = ((lead & 0x0FU) << 12) | (((unsigned char)raw_buf[raw_pos + 1] & 0x3FU) << 6) | ((unsigned char)raw_buf[raw_pos + 2] & 0x3FU);
+            } else {
+                cp = '?';
+                seq_len = 1;
+            }
+            ch = unicode_to_ascii(cp);
+        } else if (enc == 1) {  /* CP-1250 */
+            ch = lead < 0x80U ? lead : cp1250_to_ascii[lead - 128];
+        } else {  /* ASCII */
+            ch = lead;
+        }
+
+        raw_pos += seq_len;
+        raw_used += seq_len;
+
+        /* Handle special characters */
+        if (ch == '\r') continue;  /* Ignore \r */
+        if (ch == '\n') {  /* Respect existing newlines */
+            *out++ = '\n';
+            out_len++;
+            line_len = 0;
+            num_lines++;
+            continue;
+        }
+
+        /* Wrap if adding this char would exceed line width */
+        if (line_len == line_width) {
+            line_start = out - line_len;
+            last_space = NULL;
+            for (p = line_start; p < out; p++) {
+                if (*p == ' ') last_space = p;
+            }
+
+            if (last_space) {
+                /* Soft wrap at last space */
+                *last_space = '\n';
+                num_lines++;
+                line_len = (int)(out - (last_space + 1));
+                out = last_space + 1 + line_len;  /* Position out at end of remaining */
+            } else {
+                /* Hard wrap (no space found) */
+                *out++ = '\n';
+                out_len++;
+                num_lines++;
+                line_len = 0;
+            }
+        }
+
+        /* Add the character to the current line */
+        if (line_len < line_width) {
+            *out++ = ch;
+            out_len++;
+            line_len++;
+        } else {
+            /* If still can't add (after hard wrap), skip to avoid overflow */
+            continue;
+        }
+    }
+
+    *out = '\0';
+
+    /* Advance file offset by used raw bytes */
+    rs->offset += raw_used;
+
+    /* Save any leftover raw bytes for next page */
+    if (raw_pos < raw_n) {
+        leftover_len = raw_n - raw_pos;
+        memcpy(leftover, raw_buf + raw_pos, leftover_len);
+    }
+
+    /* Update expected next offset */
+    next_expected = rs->offset;
+
+    return out_len;
 }
