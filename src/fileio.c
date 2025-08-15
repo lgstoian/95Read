@@ -10,13 +10,19 @@
       - Handles long words by hard wrapping if necessary.
       - Respects existing '\n' in the text for paragraph breaks.
       - Maintains low RAM footprint with static buffers, no dynamic allocation.
-      - Encoding detection and transliteration unchanged but integrated with wrapping.
+      - Encoding detection and transliteration integrated with wrapping.
       - Leftover raw bytes saved statically for sequential page reads.
+      - Robustness at page boundary: does not consume the next character when page fills.
 ================================================================*/
 #include "95read.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>     /* strrchr, memcpy, strlen */
+
+/* Fallback only if header doesn't define it (keeps standalone compilability) */
+#ifndef PAGE_BUF_SIZE
+#define PAGE_BUF_SIZE 1024
+#endif
 
 #define RAW_BUF_SIZE 2048  /* Sufficient for UTF-8 expansion and a full page */
 
@@ -81,7 +87,7 @@ static int utf8_lead_len(unsigned char c) {
     if ((c & 0x80U) == 0x00U) return 1;
     if ((c & 0xE0U) == 0xC0U) return 2;
     if ((c & 0xF0U) == 0xE0U) return 3;
-    if ((c & 0xF8U) == 0xF0U) return 4;   /* not used here      */
+    if ((c & 0xF8U) == 0xF0U) return 4;
     return 0;                             /* invalid lead       */
 }
 
@@ -110,11 +116,8 @@ static int clip_and_save_utf8_trailer(char *buf, int n) {
 }
 
 /*================================================================
-  NEW  :  Unicode-to-ASCII transliteration
+  Unicode-to-ASCII transliteration (Latin-1, Latin-Extended-A, symbols)
 ================================================================*/
-
-/* Only the small Latin ranges needed on the HP 95LX */
-/* Improved with mappings for Latin-1 accented letters, additional symbols, and consistent quote handling. */
 typedef struct { unsigned short cp; unsigned char ascii; } UMap;
 
 static const UMap latin1_ext_a[] = {
@@ -139,12 +142,11 @@ static const UMap latin1_ext_a[] = {
     {0x0160,'S'},{0x0161,'s'},{0x0164,'T'},{0x0165,'t'},{0x016E,'U'},{0x016F,'u'},
     {0x0170,'U'},{0x0171,'u'},{0x0178,'Y'},{0x0179,'Z'},{0x017A,'z'},
     {0x017B,'Z'},{0x017C,'z'},{0x017D,'Z'},{0x017E,'z'},
-    /* Additional symbols */
+    /* Additional symbols and punctuation */
     {0x0152,'O'},{0x0153,'o'},{0x0178,'Y'},
     {0x20AC,'E'},{0x2030,'%'},{0x2122,'T'},
     {0x2020,'+'},{0x2021,'#'},
     {0x2039,'<'},{0x203A,'>'},
-    /* Additional mappings for common punctuation like dashes and quotes */
     {0x2013,'-'},{0x2014,'-'},{0x2015,'-'},{0x2212,'-'},
     {0x2018,'\''},{0x2019,'\''},{0x201A,'\''},{0x201B,'\''},
     {0x201C,'\"'},{0x201D,'\"'},{0x201E,'\"'},{0x201F,'\"'},
@@ -152,28 +154,30 @@ static const UMap latin1_ext_a[] = {
 };
 
 static unsigned char unicode_to_ascii(unsigned int cp) {
-    if (cp < 0x80U)                 /* 7-bit ASCII              */
+    int i;
+    if (cp < 0x80U)                 /* 7-bit ASCII */
         return (unsigned char)cp;
 
-    {   /* linear scan - table is small */
-        int i;
-        for (i = 0; i < (int)(sizeof(latin1_ext_a)/sizeof(UMap)); ++i)
-            if (latin1_ext_a[i].cp == cp)
-                return latin1_ext_a[i].ascii;
-    }
-    return '?';                                   /* unknown char */
+    /* linear scan - table is small */
+    for (i = 0; i < (int)(sizeof(latin1_ext_a) / sizeof(UMap)); ++i)
+        if (latin1_ext_a[i].cp == cp)
+            return latin1_ext_a[i].ascii;
+
+    return '?';                     /* unknown char */
 }
 
 /*----------------------------------------------------------------
   Simple encoding detector (improved with BOM, validation, and stats)
+  Returns: 0=UTF-8, 1=CP-1250, 2=ASCII
 ----------------------------------------------------------------*/
 static int detect_encoding(const char *buf, int len) {
     int i, utf8_seen = 0, high_seen = 0, valid_utf8_count = 0;
-    int total_bytes = 0;
 
     /* Check for UTF-8 BOM */
-    if (len >= 3 && (unsigned char)buf[0] == 0xEF &&
-        (unsigned char)buf[1] == 0xBB && (unsigned char)buf[2] == 0xBF) {
+    if (len >= 3 &&
+        (unsigned char)buf[0] == 0xEF &&
+        (unsigned char)buf[1] == 0xBB &&
+        (unsigned char)buf[2] == 0xBF) {
         return 0; /* UTF-8 */
     }
 
@@ -187,7 +191,6 @@ static int detect_encoding(const char *buf, int len) {
                 if (cp >= 0x80U && cp <= 0x7FFU) { /* Valid 2-byte UTF-8 */
                     utf8_seen = 1;
                     valid_utf8_count++;
-                    total_bytes += 2;
                     i += 1;
                 }
             } else if ((c & 0xF0U) == 0xE0U && i + 2 < len &&
@@ -196,25 +199,31 @@ static int detect_encoding(const char *buf, int len) {
                 unsigned int cp = ((c & 0x0FU) << 12) |
                                  (((unsigned char)buf[i+1] & 0x3FU) << 6) |
                                  ((unsigned char)buf[i+2] & 0x3FU);
-                if (cp >= 0x800U && cp <= 0xFFFFU && (cp < 0xD800U || cp > 0xDFFFU)) {
+                if (cp >= 0x800U && cp <= 0xFFFFU &&
+                    (cp < 0xD800U || cp > 0xDFFFU)) {
                     utf8_seen = 1;
                     valid_utf8_count++;
-                    total_bytes += 3;
                     i += 2;
                 }
+            } else if ((c & 0xF8U) == 0xF0U && i + 3 < len &&
+                       ((unsigned char)buf[i+1] & 0xC0U) == 0x80U &&
+                       ((unsigned char)buf[i+2] & 0xC0U) == 0x80U &&
+                       ((unsigned char)buf[i+3] & 0xC0U) == 0x80U) {
+                /* Valid 4-byte sequence: treat as UTF-8 presence */
+                utf8_seen = 1;
+                valid_utf8_count++;
+                i += 3;
             }
-        } else {
-            total_bytes++;
         }
     }
 
     if (!high_seen) return 2; /* ASCII */
-    if (utf8_seen && (valid_utf8_count * 2) > (high_seen / 2)) return 0; /* UTF-8 if significant valid sequences */
+    if (utf8_seen && (valid_utf8_count * 2) > (high_seen / 2)) return 0; /* likely UTF-8 */
     return 1; /* CP-1250 */
 }
 
 /*----------------------------------------------------------------
-  I/O initialisation - unchanged
+  I/O initialisation
 ----------------------------------------------------------------*/
 void io_init(ReaderState *rs, const char *path) {
     const char *ext = strrchr(path, '.');
@@ -231,10 +240,12 @@ void io_init(ReaderState *rs, const char *path) {
     if (fseek(rs->fp, 0L, SEEK_END) != 0 ||
         (rs->file_size = ftell(rs->fp)) < 0L ||
         fseek(rs->fp, 0L, SEEK_SET) != 0)
-    { printf("File error on \"%s\"\n", path); fclose(rs->fp); exit(1); }
+    { printf("File error on \"%s\"\n", path); if (rs->fp) fclose(rs->fp); exit(1); }
 
     if (rs->file_size == 0L)
         printf("Warning: \"%s\" is empty\n", path);
+
+    rs->offset = 0L;
 
     utf8_edge_len = 0;
     leftover_len = 0;
@@ -242,7 +253,21 @@ void io_init(ReaderState *rs, const char *path) {
 }
 
 /*----------------------------------------------------------------
-  read_page - public API, now with word wrapping and full page formatting
+  Optional cleanup (safe to call multiple times)
+----------------------------------------------------------------*/
+void io_done(ReaderState *rs) {
+    if (rs && rs->fp) {
+        fclose(rs->fp);
+        rs->fp = NULL;
+    }
+    utf8_edge_len = 0;
+    leftover_len = 0;
+    next_expected = -1L;
+}
+
+/*----------------------------------------------------------------
+  read_page - public API, word wrapping and full page formatting
+  Returns number of bytes written to buf (0 on end-of-file).
 ----------------------------------------------------------------*/
 int read_page(ReaderState *rs, char *buf) {
     static char raw_buf[RAW_BUF_SIZE];
@@ -265,9 +290,14 @@ int read_page(ReaderState *rs, char *buf) {
     char *last_space;
     char *p;
     int line_width = cfg.screen_cols;
-    int page_lines = cfg.screen_lines - 1;
+    int page_lines = cfg.screen_lines - 1;  /* reserve status line */
 
-    if (rs->offset >= rs->file_size && utf8_edge_len == 0 && leftover_len == 0) return 0;
+    /* Fallbacks if cfg not initialized */
+    if (line_width <= 0) line_width = 40;
+    if (page_lines <= 0) page_lines = 15;
+
+    if (rs->offset >= rs->file_size && utf8_edge_len == 0 && leftover_len == 0)
+        return 0;
 
     /* Clear leftovers if not sequential forward read */
     if (next_expected != rs->offset) {
@@ -285,6 +315,7 @@ int read_page(ReaderState *rs, char *buf) {
     /* Read more if needed and possible */
     to_read = RAW_BUF_SIZE - 1 - raw_n;
     if (to_read > 0 && rs->offset < rs->file_size) {
+        /* Read immediately after the bytes we already staged (leftover) */
         if (fseek(rs->fp, rs->offset + raw_n, SEEK_SET) != 0) {
             printf("Seek error at %ld\n", rs->offset);
             return 0;
@@ -298,13 +329,13 @@ int read_page(ReaderState *rs, char *buf) {
 
     raw_buf[raw_n] = '\0';
 
-    /* Prepend UTF-8 edge if any */
+    /* Prepend any cut UTF-8 sequence from the previous read */
     raw_n = prepend_utf8_edge(raw_buf, raw_n, RAW_BUF_SIZE);
 
     /* Detect encoding */
     enc = detect_encoding(raw_buf, raw_n);
 
-    /* Clip UTF-8 trailer if UTF-8 */
+    /* Clip UTF-8 trailer if UTF-8 and not at file end */
     if (enc == 0 && rs->offset + raw_n < rs->file_size) {
         raw_n = clip_and_save_utf8_trailer(raw_buf, raw_n);
     }
@@ -318,7 +349,7 @@ int read_page(ReaderState *rs, char *buf) {
         raw_n -= 3;
     }
 
-    raw_used = 0;  /* Reset to track actual used bytes */
+    raw_used = 0;  /* Track actually consumed raw bytes */
 
     /* Build formatted page with word wrapping */
     while (num_lines < page_lines && out_len < PAGE_BUF_SIZE - 1 && !is_eof) {
@@ -338,26 +369,35 @@ int read_page(ReaderState *rs, char *buf) {
             if (seq_len == 1) {
                 cp = lead;
             } else if (seq_len == 2 && raw_pos + 1 < raw_n) {
-                cp = ((lead & 0x1FU) << 6) | ((unsigned char)raw_buf[raw_pos + 1] & 0x3FU);
+                cp = ((lead & 0x1FU) << 6) |
+                     ((unsigned char)raw_buf[raw_pos + 1] & 0x3FU);
             } else if (seq_len == 3 && raw_pos + 2 < raw_n) {
-                cp = ((lead & 0x0FU) << 12) | (((unsigned char)raw_buf[raw_pos + 1] & 0x3FU) << 6) | ((unsigned char)raw_buf[raw_pos + 2] & 0x3FU);
+                cp = ((lead & 0x0FU) << 12) |
+                     (((unsigned char)raw_buf[raw_pos + 1] & 0x3FU) << 6) |
+                     ((unsigned char)raw_buf[raw_pos + 2] & 0x3FU);
+            } else if (seq_len == 4 && raw_pos + 3 < raw_n) {
+                /* Consume all 4 bytes even though we will map to '?' */
+                cp = 0x10000U; /* beyond BMP -> will become '?' */
             } else {
+                /* Invalid or incomplete; treat lead as a single unknown */
                 cp = '?';
                 seq_len = 1;
             }
             ch = unicode_to_ascii(cp);
         } else if (enc == 1) {  /* CP-1250 */
-            ch = lead < 0x80U ? lead : cp1250_to_ascii[lead - 128];
+            ch = (lead < 0x80U) ? (char)lead : (char)cp1250_to_ascii[lead - 128];
         } else {  /* ASCII */
-            ch = lead;
+            ch = (char)lead;
         }
 
         raw_pos += seq_len;
         raw_used += seq_len;
 
-        /* Handle special characters */
-        if (ch == '\r') continue;  /* Ignore \r */
-        if (ch == '\n') {  /* Respect existing newlines */
+        /* Normalize CRLF: ignore '\r' */
+        if (ch == '\r') continue;
+
+        /* Respect existing newlines */
+        if (ch == '\n') {
             *out++ = '\n';
             out_len++;
             line_len = 0;
@@ -365,36 +405,52 @@ int read_page(ReaderState *rs, char *buf) {
             continue;
         }
 
-        /* Wrap if adding this char would exceed line width */
+        /* Wrap if current line is already full before adding this char */
         if (line_len == line_width) {
             line_start = out - line_len;
             last_space = NULL;
-            for (p = line_start; p < out; p++) {
+            for (p = line_start; p < out; ++p) {
                 if (*p == ' ') last_space = p;
             }
 
             if (last_space) {
-                /* Soft wrap at last space */
+                /* Soft wrap at last space: turn it into newline */
                 *last_space = '\n';
                 num_lines++;
+
+                /* Remaining chars after the space stay as the start of next line */
                 line_len = (int)(out - (last_space + 1));
-                out = last_space + 1 + line_len;  /* Position out at end of remaining */
+                /* out remains unchanged; we will append after existing tail */
+
+                /* If page filled by the wrap, unconsume this char for next page */
+                if (num_lines >= page_lines) {
+                    raw_pos -= seq_len;
+                    raw_used -= seq_len;
+                    break;
+                }
             } else {
-                /* Hard wrap (no space found) */
+                /* Hard wrap (no space found): break line here */
                 *out++ = '\n';
                 out_len++;
                 num_lines++;
                 line_len = 0;
+
+                /* If page filled by the wrap, unconsume this char for next page */
+                if (num_lines >= page_lines) {
+                    raw_pos -= seq_len;
+                    raw_used -= seq_len;
+                    break;
+                }
             }
         }
 
-        /* Add the character to the current line */
+        /* Add the character to the current (possibly new) line */
         if (line_len < line_width) {
             *out++ = ch;
             out_len++;
             line_len++;
         } else {
-            /* If still can't add (after hard wrap), skip to avoid overflow */
+            /* Safety: shouldn't happen due to wrap above */
             continue;
         }
     }
@@ -407,6 +463,7 @@ int read_page(ReaderState *rs, char *buf) {
     /* Save any leftover raw bytes for next page */
     if (raw_pos < raw_n) {
         leftover_len = raw_n - raw_pos;
+        if (leftover_len > RAW_BUF_SIZE) leftover_len = RAW_BUF_SIZE; /* clamp */
         memcpy(leftover, raw_buf + raw_pos, leftover_len);
     }
 
