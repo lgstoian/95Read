@@ -329,6 +329,7 @@ void load_config(void)
     cfg.key_next_page = 'N';
     cfg.key_prev_page = 'P';
     cfg.key_quit      = 'C';
+    cfg.key_invert    = 'I';
     /* default extension */
     cfg.prog_ext[0] = '\0';
     set_prog_ext_safe(".95r");
@@ -351,6 +352,7 @@ void load_config(void)
                     "# key_next_page  (char like 'N', name: ESC/SPACE/ENTER/TAB/BS/DEL, decimal 27, or hex 0x1B)\n"
                     "# key_prev_page  (same forms as above)\n"
                     "# key_quit       (same forms as above; ESC always quits)\n"
+                    "# key_invert     (same forms as above)\n"
                     "# prog_ext       (include dot, e.g., .95r)\n"
                     "# Tip: ESC always quits, regardless of key_quit.\n"
                 );
@@ -360,6 +362,7 @@ void load_config(void)
                 fprintf(fw, "key_next_page  = '%c'\n", cfg.key_next_page);
                 fprintf(fw, "key_prev_page  = '%c'\n", cfg.key_prev_page);
                 fprintf(fw, "key_quit       = '%c'\n", cfg.key_quit);
+                fprintf(fw, "key_invert     = '%c'\n", cfg.key_invert);
                 fprintf(fw, "prog_ext       = %s\n", cfg.prog_ext);
                 fclose(fw);
             }
@@ -403,6 +406,11 @@ void load_config(void)
             iv = parse_key_token(val);
             if (iv >= 0 && iv <= 255)
                 cfg.key_quit = (char)iv;
+        }
+        else if (strcmp(key, "key_invert") == 0) {
+            iv = parse_key_token(val);
+            if (iv >= 0 && iv <= 255)
+                cfg.key_invert = (char)iv;
         }
         else if (strcmp(key, "prog_ext") == 0) {
             set_prog_ext_safe(val);

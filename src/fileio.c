@@ -398,45 +398,106 @@ int read_page(ReaderState *rs, char *buf) {
 
         /* Respect existing newlines */
         if (ch == '\n') {
-            *out++ = '\n';
-            out_len++;
-            line_len = 0;
-            num_lines++;
+            if (num_lines < page_lines - 1) {
+                *out++ = '\n';
+                out_len++;
+                line_len = 0;
+                num_lines++;
+            } else {
+                raw_pos -= seq_len;
+                raw_used -= seq_len;
+                break;
+            }
             continue;
         }
 
-        /* Wrap if current line is already full before adding this char */
-        if (line_len == line_width) {
-            line_start = out - line_len;
-            last_space = NULL;
-            for (p = line_start; p < out; ++p) {
-                if (*p == ' ') last_space = p;
+        /* Lookahead for word fit if starting a new word */
+        if (ch != ' ' && (line_len == 0 || *(out - 1) == ' ')) {
+            int temp_pos = raw_pos - seq_len;  /* start from current ch */
+            int word_len = 0;
+            while (temp_pos < raw_n) {
+                unsigned char tlead = (unsigned char)raw_buf[temp_pos];
+                int tseq = 1;
+                unsigned int tcp = 0;
+                char tch = 0;
+                if (enc == 0) {
+                    tseq = utf8_lead_len(tlead);
+                    if (tseq == 1) {
+                        tcp = tlead;
+                    } else if (tseq == 2 && temp_pos + 1 < raw_n) {
+                        tcp = ((tlead & 0x1FU) << 6) |
+                              ((unsigned char)raw_buf[temp_pos + 1] & 0x3FU);
+                    } else if (tseq == 3 && temp_pos + 2 < raw_n) {
+                        tcp = ((tlead & 0x0FU) << 12) |
+                              (((unsigned char)raw_buf[temp_pos + 1] & 0x3FU) << 6) |
+                              ((unsigned char)raw_buf[temp_pos + 2] & 0x3FU);
+                    } else if (tseq == 4 && temp_pos + 3 < raw_n) {
+                        tcp = 0x10000U;
+                    } else {
+                        tcp = '?';
+                        tseq = 1;
+                    }
+                    tch = unicode_to_ascii(tcp);
+                } else if (enc == 1) {
+                    tch = (tlead < 0x80U) ? (char)tlead : (char)cp1250_to_ascii[tlead - 128];
+                } else {
+                    tch = (char)tlead;
+                }
+                if (tch == ' ' || tch == '\n' || tch == '\r') break;
+                word_len++;
+                temp_pos += tseq;
             }
-
-            if (last_space) {
-                /* Soft wrap at last space: turn it into newline */
-                *last_space = '\n';
-                num_lines++;
-
-                /* Remaining chars after the space stay as the start of next line */
-                line_len = (int)(out - (last_space + 1));
-                /* out remains unchanged; we will append after existing tail */
-
-                /* If page filled by the wrap, unconsume this char for next page */
-                if (num_lines >= page_lines) {
+            if (word_len > line_width - line_len) {
+                /* Word doesn't fit in remaining space */
+                if (num_lines < page_lines - 1) {
+                    /* Can wrap to new line */
+                    line_start = out - line_len;
+                    last_space = NULL;
+                    for (p = line_start; p < out; ++p) {
+                        if (*p == ' ') last_space = p;
+                    }
+                    if (last_space) {
+                        *last_space = '\n';
+                        num_lines++;
+                        line_len = (int)(out - (last_space + 1));
+                        continue;  /* Don't add ch yet, it will be added on new line */
+                    }
+                    /* If no space (long word at line start), fall through to add */
+                } else {
+                    /* Can't wrap (last line of page), don't start word */
                     raw_pos -= seq_len;
                     raw_used -= seq_len;
                     break;
                 }
-            } else {
-                /* Hard wrap (no space found): break line here */
-                *out++ = '\n';
-                out_len++;
-                num_lines++;
-                line_len = 0;
+            }
+        }
 
-                /* If page filled by the wrap, unconsume this char for next page */
-                if (num_lines >= page_lines) {
+        /* Wrap if current line is already full before adding this char */
+        if (line_len == line_width) {
+            if (num_lines < page_lines - 1) {
+                line_start = out - line_len;
+                last_space = NULL;
+                for (p = line_start; p < out; ++p) {
+                    if (*p == ' ') last_space = p;
+                }
+                if (last_space) {
+                    /* Soft wrap at last space: turn it into newline */
+                    *last_space = '\n';
+                    num_lines++;
+                    line_len = (int)(out - (last_space + 1));
+                } else {
+                    /* Hard wrap (no space found): break line here */
+                    *out++ = '\n';
+                    out_len++;
+                    num_lines++;
+                    line_len = 0;
+                }
+            } else {
+                /* Can't wrap, check if we can skip space or must stop */
+                if (ch == ' ') {
+                    /* Skip space (consume but don't add) */
+                    continue;
+                } else {
                     raw_pos -= seq_len;
                     raw_used -= seq_len;
                     break;

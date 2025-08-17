@@ -50,6 +50,7 @@ typedef struct {
     unsigned char key_next_page;     /* command key to advance page */
     unsigned char key_prev_page;     /* command key to go back */
     unsigned char key_quit;          /* command key to exit */
+    unsigned char key_invert;        /* command key to invert colors */
     char prog_ext[MAX_PROG_EXT_LEN + 1];
                             /* user-specified save-file extension */
 } Config;

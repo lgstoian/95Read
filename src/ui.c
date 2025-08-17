@@ -1,3 +1,7 @@
+/* ui.c
+   Note: Changes are annotated with "CHANGED" comments near the modified/added lines.
+*/
+
 #include "95read.h"
 #include <conio.h>   /* getch(), putch() */
 
@@ -10,6 +14,8 @@
     N/P/C  -> next/prev/quit (or runtime-configured values, case-insensitive)
     B/E    -> begin/end
     G      -> goto percentage prompt
+    I      -> invert colors (case-insensitive)              // CHANGED: documented explicitly
+    T      -> open inversion test screen (case-insensitive) // CHANGED: added T support
     Arrows/Home/End/PgUp/PgDn -> intuitive navigation
   Ignores all other keys (including other extended keys).
 */
@@ -33,7 +39,7 @@ char ui_get_cmd(void) {
                 case 71: return 'B';                /* Home -> begin */
                 case 79: return 'E';                /* End  -> end   */
                 case 73: return cfg.key_prev_page;  /* PgUp -> prev  */
-                case 81: return cfg.key_next_page; /* PgDn -> next  */
+                case 81: return cfg.key_next_page;  /* PgDn -> next  */
                 case 72:                            /* Up    -> prev */
                 case 75:                            /* Left  -> prev */
                     return cfg.key_prev_page;
@@ -85,6 +91,16 @@ char ui_get_cmd(void) {
         }
         if (my_toupper((unsigned char)c) == KEY_GOTO) {
             return KEY_GOTO;
+        }
+
+        /* invert colors (case-insensitive) */
+        if (my_toupper((unsigned char)c) == 'I') {
+            return 'I';
+        }
+
+        /* CHANGED: inversion test command (case-insensitive) */
+        if (my_toupper((unsigned char)c) == 'T') {
+            return 'T';
         }
 
         /* otherwise ignore and loop */

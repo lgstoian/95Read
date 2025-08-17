@@ -33,6 +33,9 @@
 #ifndef KEY_QUIT
   #define KEY_QUIT       'C'
 #endif
+#ifndef KEY_INVERT
+  #define KEY_INVERT     'I'
+#endif
 
 /* Additional navigation keys (compile-time only; no cfg dependency) */
 #ifndef KEY_BEGIN
@@ -71,19 +74,24 @@
   - Note: For best compatibility, use uppercase letters in config file.
 --------------------------------------------------------------------*/
 #define IS_KEY_NEXT(c) ( \
-    ((c) == KEY_NEXT_PAGE) || \
-    ((c) == TO_UPPER(cfg.key_next_page)) \
+    (TO_UPPER(c) == KEY_NEXT_PAGE) || \
+    (TO_UPPER(c) == TO_UPPER(cfg.key_next_page)) \
 )
 
 #define IS_KEY_PREV(c) ( \
-    ((c) == KEY_PREV_PAGE) || \
-    ((c) == TO_UPPER(cfg.key_prev_page)) \
+    (TO_UPPER(c) == KEY_PREV_PAGE) || \
+    (TO_UPPER(c) == TO_UPPER(cfg.key_prev_page)) \
 )
 
 #define IS_KEY_QUIT(c) ( \
-    ((c) == KEY_QUIT) || \
-    ((c) == TO_UPPER(cfg.key_quit)) || \
+    (TO_UPPER(c) == KEY_QUIT) || \
+    (TO_UPPER(c) == TO_UPPER(cfg.key_quit)) || \
     ((c) == 27) \
+)
+
+#define IS_KEY_INVERT(c) ( \
+    (TO_UPPER(c) == KEY_INVERT) || \
+    (TO_UPPER(c) == TO_UPPER(cfg.key_invert)) \
 )
 
 /* compile-time only helpers for begin/end/goto */
