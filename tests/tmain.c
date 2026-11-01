@@ -564,7 +564,6 @@ static void test_utf8_boundary(void)
     for (i = 0; i < 2046; ++i) big[i] = 'A';
     big[2046] = (char)0xE2; big[2047] = (char)0x82; big[2048] = (char)0xAC;
     for (i = 2049; i < 2200; ++i) big[i] = 'B';
-    big[2200] = '\0';
     write_file("tests\\t9.txt", big, 2200);
 
     cfg.screen_cols = 40;
