@@ -1,4 +1,6 @@
 /* config.c
+   @mod: config
+   @breadcrumb: config/load
    HP 95LX-friendly config loader for 95read
 
    Notes:
@@ -315,6 +317,8 @@ static int parse_kv(char *line, char *key_out, size_t key_cap, char *val_out, si
     return 1;
 }
 
+/* @region: config
+   @breadcrumb: config/load_config */
 void load_config(void)
 {
     FILE *fp;
@@ -339,33 +343,37 @@ void load_config(void)
         const char *cfg_path = get_config_path();
         fp = fopen(cfg_path, "r");
         if (fp == NULL) {
-            /* Not found: create a new one with comments + defaults */
-            FILE *fw = fopen(cfg_path, "w");
-            if (fw) {
-                fprintf(fw,
-                    "# HP95LX Reader Configuration (95read.cfg)\n"
-                    "# You can use end-of-line comments starting with # or ;\n"
-                    "# Format: key = value   (quotes allowed)\n"
-                    "# screen_lines   (4..100)\n"
-                    "# screen_cols    (4..200)\n"
-                    "# tab_width      (1..16)\n"
-                    "# key_next_page  (char like 'N', name: ESC/SPACE/ENTER/TAB/BS/DEL, decimal 27, or hex 0x1B)\n"
-                    "# key_prev_page  (same forms as above)\n"
-                    "# key_quit       (same forms as above; ESC always quits)\n"
-                    "# key_invert     (same forms as above)\n"
-                    "# prog_ext       (include dot, e.g., .95r)\n"
-                    "# Tip: ESC always quits, regardless of key_quit.\n"
-                );
-                fprintf(fw, "screen_lines   = %d\n", cfg.screen_lines);
-                fprintf(fw, "screen_cols    = %d\n", cfg.screen_cols);
-                fprintf(fw, "tab_width      = %d\n", cfg.tab_width);
-                fprintf(fw, "key_next_page  = '%c'\n", cfg.key_next_page);
-                fprintf(fw, "key_prev_page  = '%c'\n", cfg.key_prev_page);
-                fprintf(fw, "key_quit       = '%c'\n", cfg.key_quit);
-                fprintf(fw, "key_invert     = '%c'\n", cfg.key_invert);
-                fprintf(fw, "prog_ext       = %s\n", cfg.prog_ext);
-                fclose(fw);
+#if !CFG_SKIP_WRITE_DEFAULT
+            /* Not found: create a new one with comments + defaults (if allowed) */
+            {
+                FILE *fw = fopen(cfg_path, "w");
+                if (fw) {
+                    fprintf(fw,
+                        "# HP95LX Reader Configuration (95read.cfg)\n"
+                        "# You can use end-of-line comments starting with # or ;\n"
+                        "# Format: key = value   (quotes allowed)\n"
+                        "# screen_lines   (4..100)\n"
+                        "# screen_cols    (4..200)\n"
+                        "# tab_width      (1..16)\n"
+                        "# key_next_page  (char like 'N', name: ESC/SPACE/ENTER/TAB/BS/DEL, decimal 27, or hex 0x1B)\n"
+                        "# key_prev_page  (same forms as above)\n"
+                        "# key_quit       (same forms as above; ESC always quits)\n"
+                        "# key_invert     (same forms as above)\n"
+                        "# prog_ext       (include dot, e.g., .95r)\n"
+                        "# Tip: ESC always quits, regardless of key_quit.\n"
+                    );
+                    fprintf(fw, "screen_lines   = %d\n", cfg.screen_lines);
+                    fprintf(fw, "screen_cols    = %d\n", cfg.screen_cols);
+                    fprintf(fw, "tab_width      = %d\n", cfg.tab_width);
+                    fprintf(fw, "key_next_page  = '%c'\n", cfg.key_next_page);
+                    fprintf(fw, "key_prev_page  = '%c'\n", cfg.key_prev_page);
+                    fprintf(fw, "key_quit       = '%c'\n", cfg.key_quit);
+                    fprintf(fw, "key_invert     = '%c'\n", cfg.key_invert);
+                    fprintf(fw, "prog_ext       = %s\n", cfg.prog_ext);
+                    fclose(fw);
+                }
             }
+#endif
             return;
         }
     }
@@ -379,18 +387,21 @@ void load_config(void)
 
         if (strcmp(key, "screen_lines") == 0) {
             iv = atoi(val);
-            if (iv >= 4 && iv <= 100)
-                cfg.screen_lines = iv;
+            if (iv < MIN_SCREEN_LINES) iv = MIN_SCREEN_LINES;
+            if (iv > MAX_SCREEN_LINES) iv = MAX_SCREEN_LINES;
+            cfg.screen_lines = iv;
         }
         else if (strcmp(key, "screen_cols") == 0) {
             iv = atoi(val);
-            if (iv >= 4 && iv <= 200)
-                cfg.screen_cols = iv;
+            if (iv < MIN_SCREEN_COLS) iv = MIN_SCREEN_COLS;
+            if (iv > MAX_SCREEN_COLS) iv = MAX_SCREEN_COLS;
+            cfg.screen_cols = iv;
         }
         else if (strcmp(key, "tab_width") == 0) {
             iv = atoi(val);
-            if (iv >= 1 && iv <= 16)
-                cfg.tab_width = iv;
+            if (iv < MIN_TAB_WIDTH) iv = MIN_TAB_WIDTH;
+            if (iv > MAX_TAB_WIDTH) iv = MAX_TAB_WIDTH;
+            cfg.tab_width = iv;
         }
         else if (strcmp(key, "key_next_page") == 0) {
             iv = parse_key_token(val);

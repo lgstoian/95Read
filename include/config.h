@@ -1,3 +1,8 @@
+/* config.h
+   @mod: config.h
+   @breadcrumb: config/types
+   Configuration types, limits and defaults.
+*/
 #ifndef CONFIG_H
 #define CONFIG_H
 

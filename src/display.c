@@ -1,14 +1,83 @@
+/* display.c
+   @mod: display
+   @breadcrumb: display/render
+   Page rendering: writes a formatted page buffer to the text screen.
+*/
+
 #include "95read.h"
 #include <conio.h>    /* clrscr(), gotoxy(), putch() */
 #include <stddef.h>   /* size_t */
+#include <stdio.h>    /* sprintf */
+#include <string.h>   /* memcpy */
 
-/* Emit CRLF using putch to ensure column reset on HP 95LX BIOS */
+/* @region: render
+   @breadcrumb: display/emit_crlf
+   Emit CRLF using putch to ensure column reset on HP 95LX BIOS. */
 static void emit_crlf(void) {
     putch('\r');
     putch('\n');
 }
 
+/*---------------------------------------------------------------
+  @region: breadcrumb
+  @breadcrumb: display/build_breadcrumb
+  Build the navigation breadcrumb trail from the reader's history:
+  the most recently visited page offsets rendered as 1-based page
+  numbers and joined with '>' (e.g. "1>4>9").  The page size is
+  approximated from the configured geometry.  At most BREADCRUMB_MAX
+  entries are shown; the oldest are dropped first.  The result is
+  always NUL-terminated and never exceeds cap bytes.
+---------------------------------------------------------------*/
+void build_breadcrumb(const ReaderState *rs, char *out, size_t cap) {
+    int i;
+    int n = rs->hist_count;
+    int start;
+    int max_entries = BREADCRUMB_MAX;
+    size_t len = 0;
+    long page_size;
+
+    out[0] = '\0';
+    if (n <= 0 || cap == 0) return;
+
+    /* Approximate page size from the configured geometry. */
+    page_size = (long)EFF_SCREEN_COLS * (long)(EFF_SCREEN_LINES - 1);
+    if (page_size <= 0L) page_size = 1L;
+
+    start = n - max_entries;
+    if (start < 0) start = 0;
+
+    for (i = start; i < n; ++i) {
+        long off = rs->history[i];
+        long page;
+        char num[12];
+        int nlen;
+
+        if (off < 0L) off = 0L;
+        page = (off / page_size) + 1L;
+        nlen = sprintf(num, "%ld", page);
+
+        if (i > start) {
+            if (len + 1 < cap) {
+                out[len++] = '>';
+            } else {
+                out[cap - 1] = '\0';
+                return;
+            }
+        }
+        if (len + (size_t)nlen < cap) {
+            memcpy(out + len, num, (size_t)nlen);
+            len += (size_t)nlen;
+            out[len] = '\0';
+        } else {
+            out[cap - 1] = '\0';
+            return;
+        }
+    }
+}
+
 /*
+  @region: render
+  @breadcrumb: display/display_page
   display_page
   ------------
   - Renders the given page buffer into the HP 95LX 40x16 text screen.
@@ -38,12 +107,18 @@ int display_page(const char *buf) {
     int done = 0;
 
     /* Effective geometry; reserve last line for status/footer if possible */
-    const int eff_lines = EFF_SCREEN_LINES;
-    const int eff_cols  = EFF_SCREEN_COLS;
-    const int view_rows = (eff_lines > 1) ? (eff_lines - 1) : eff_lines;
+    int eff_lines = EFF_SCREEN_LINES;
+    int eff_cols  = EFF_SCREEN_COLS;
+    int view_rows;
+    int tabw;  /* tab width (clamped below) */
+
+    /* Clamp to at least 1x1 to avoid degenerate configs */
+    if (eff_lines < 1) eff_lines = 1;
+    if (eff_cols  < 1) eff_cols  = 1;
+    view_rows = (eff_lines > 1) ? (eff_lines - 1) : eff_lines;
 
     /* Clamp tab width to a safe range (prevents div-by-zero and huge loops) */
-    int tabw = cfg.tab_width;
+    tabw = cfg.tab_width;
     if (tabw < 1)  tabw = 4;
     if (tabw > 16) tabw = 16;
 

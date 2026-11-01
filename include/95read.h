@@ -1,3 +1,8 @@
+/* 95read.h
+   @mod: 95read.h
+   @breadcrumb: 95read/shared
+   Public header: constants, reader state, module interfaces.
+*/
 #ifndef READ95_H
 #define READ95_H
 
@@ -111,6 +116,12 @@
 --------------------------------------------------------------------*/
 #define HIST_INIT_CAP   16
 
+/* Maximum history entries to bound memory on HP 95LX (4 bytes per entry) */
+#define HIST_MAX_CAP    64
+
+/* Maximum entries rendered in the navigation breadcrumb trail */
+#define BREADCRUMB_MAX  6
+
 /*--------------------------------------------------------------------
   Reader state shared across modules
 --------------------------------------------------------------------*/
@@ -132,10 +143,12 @@ typedef struct {
 
 /* fileio.c */
 void io_init(ReaderState *rs, const char *path);
+void io_done(ReaderState *rs);
 int  read_page(ReaderState *rs, char *buf);
 
 /* display.c */
 int  display_page(const char *buf);
+void build_breadcrumb(const ReaderState *rs, char *out, size_t cap);
 
 /* ui.c */
 char ui_get_cmd(void);

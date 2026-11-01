@@ -1,3 +1,9 @@
+/* progress.c
+   @mod: progress
+   @breadcrumb: progress/sidecar
+   Load/save reading progress with checksum and atomic writes.
+*/
+
 #include "95read.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,6 +95,17 @@ static void normalize_loaded_history(ReaderState *rs) {
         if (off > rs->file_size) off = rs->file_size;
         rs->history[w++] = off;
     }
+
+    /* Bound history depth to keep memory small (align with HIST_MAX_CAP). */
+    if (w > HIST_MAX_CAP) {
+        int start = w - HIST_MAX_CAP;
+        int dst = 0;
+        for (i = start; i < w; ++i) {
+            rs->history[dst++] = rs->history[i];
+        }
+        w = HIST_MAX_CAP;
+    }
+
     rs->hist_count = w;
     rs->hist_capacity = rs->hist_count;
 
@@ -197,6 +214,8 @@ static int try_load_legacy_format(FILE *pf, ReaderState *rs, long fsize) {
     return 1;
 }
 
+/* @region: sidecar
+   @breadcrumb: progress/load_progress */
 void load_progress(ReaderState *rs) {
     char progfile[128];
     const char *ext;
@@ -250,17 +269,20 @@ static void write_progress_atomic(const char *final_path, const ReaderState *rs)
     FILE *pf;
     unsigned short count_to_write = 0;
     int i;
+    int used_temp;
     long last = -1L;
 
     /* Build temp file path using ".~r" extension. */
     build_temp_path(tmpfile, sizeof(tmpfile), rs->progfile_base);
 
     /* Open temp for binary write. */
+    used_temp = 1;
     pf = fopen(tmpfile, "wb");
     if (!pf) {
         /* Fallback: write directly to final if temp fails. */
         pf = fopen(final_path, "wb");
         if (!pf) return;
+        used_temp = 0;
     }
 
     /* First pass: compute count_to_write (dedupe consecutive and cap last N). */
@@ -310,8 +332,8 @@ static void write_progress_atomic(const char *final_path, const ReaderState *rs)
 
     fclose(pf);
 
-    /* If we successfully wrote to temp, atomically replace final. */
-    if (strcmp(tmpfile, final_path) != 0) {
+    /* If we wrote to temp, atomically replace final. */
+    if (used_temp && strcmp(tmpfile, final_path) != 0) {
         remove(final_path);
         if (rename(tmpfile, final_path) != 0) {
             /* If rename fails, remove temp to avoid litter. */
@@ -320,6 +342,8 @@ static void write_progress_atomic(const char *final_path, const ReaderState *rs)
     }
 }
 
+/* @region: sidecar
+   @breadcrumb: progress/save_progress */
 void save_progress(const ReaderState *rs) {
     char progfile[128];
     const char *ext = effective_ext();

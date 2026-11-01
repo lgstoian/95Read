@@ -1,0 +1,18 @@
+# --- Test harness output (8.3-safe names; Turbo C 2.01 has no LFN) ---
+test.exe
+TEST.MAP
+tmain.obj
+results.txt
+tests/test.cfg
+tests/*.txt
+tests/*.95r
+tests/*.dat
+
+# --- Debug / runtime cruft ---
+debug-*.log
+*.LOG
+*.95r
+*.95R
+P.95R
+dbg*.bat
+*.bak

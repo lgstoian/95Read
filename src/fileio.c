@@ -1,5 +1,7 @@
 /*================================================================
   fileio.c - text-page reader for HP 95LX with word wrapping
+  @mod: fileio
+  @breadcrumb: fileio/encoding
   ---------------------------------------------------------------
   - Builds with Borland Turbo C 2.01 (small model, 8088 code).
   - Needs only the public "95read.h".
@@ -57,28 +59,6 @@ static int           leftover_len = 0;
   Track the expected next offset to detect jumps and clear leftovers
 ----------------------------------------------------------------*/
 static long next_expected = -1L;
-
-/*----------------------------------------------------------------
-  Prepend saved leading bytes (if any) to freshly read text
-----------------------------------------------------------------*/
-static int prepend_utf8_edge(char *buf, int n, int cap) {
-    int i;
-    if (utf8_edge_len == 0) return n;
-
-    if (utf8_edge_len + n >= cap)
-        n = cap - 1 - utf8_edge_len;
-
-    for (i = n - 1; i >= 0; --i)          /* move payload right */
-        buf[i + utf8_edge_len] = buf[i];
-
-    for (i = 0; i < utf8_edge_len; ++i)   /* copy edge in front */
-        buf[i] = (char)utf8_edge[i];
-
-    n += utf8_edge_len;
-    buf[n] = '\0';
-    utf8_edge_len = 0;
-    return n;
-}
 
 /*----------------------------------------------------------------
   UTF-8 helper - length of a lead byte
@@ -167,6 +147,8 @@ static unsigned char unicode_to_ascii(unsigned int cp) {
 }
 
 /*----------------------------------------------------------------
+  @region: encoding
+  @breadcrumb: fileio/detect_encoding
   Simple encoding detector (improved with BOM, validation, and stats)
   Returns: 0=UTF-8, 1=CP-1250, 2=ASCII
 ----------------------------------------------------------------*/
@@ -223,6 +205,8 @@ static int detect_encoding(const char *buf, int len) {
 }
 
 /*----------------------------------------------------------------
+  @region: io
+  @breadcrumb: fileio/io_init
   I/O initialisation
 ----------------------------------------------------------------*/
 void io_init(ReaderState *rs, const char *path) {
@@ -253,6 +237,8 @@ void io_init(ReaderState *rs, const char *path) {
 }
 
 /*----------------------------------------------------------------
+  @region: io
+  @breadcrumb: fileio/io_done
   Optional cleanup (safe to call multiple times)
 ----------------------------------------------------------------*/
 void io_done(ReaderState *rs) {
@@ -266,6 +252,8 @@ void io_done(ReaderState *rs) {
 }
 
 /*----------------------------------------------------------------
+  @region: paging
+  @breadcrumb: fileio/read_page
   read_page - public API, word wrapping and full page formatting
   Returns number of bytes written to buf (0 on end-of-file).
 ----------------------------------------------------------------*/
@@ -289,12 +277,13 @@ int read_page(ReaderState *rs, char *buf) {
     char *line_start;
     char *last_space;
     char *p;
-    int line_width = cfg.screen_cols;
-    int page_lines = cfg.screen_lines - 1;  /* reserve status line */
+    int line_width = EFF_SCREEN_COLS;
+    int page_lines = EFF_SCREEN_LINES - 1;  /* reserve status line */
 
-    /* Fallbacks if cfg not initialized */
-    if (line_width <= 0) line_width = 40;
-    if (page_lines <= 0) page_lines = 15;
+    /* Fallbacks if cfg not initialized or clamped oddly */
+    if (line_width <= 0)  line_width  = SCREEN_COLS;
+    if (page_lines <= 0)
+        page_lines = SCREEN_LINES - 1;
 
     if (rs->offset >= rs->file_size && utf8_edge_len == 0 && leftover_len == 0)
         return 0;
@@ -328,9 +317,6 @@ int read_page(ReaderState *rs, char *buf) {
     }
 
     raw_buf[raw_n] = '\0';
-
-    /* Prepend any cut UTF-8 sequence from the previous read */
-    raw_n = prepend_utf8_edge(raw_buf, raw_n, RAW_BUF_SIZE);
 
     /* Detect encoding */
     enc = detect_encoding(raw_buf, raw_n);
@@ -377,7 +363,7 @@ int read_page(ReaderState *rs, char *buf) {
                      ((unsigned char)raw_buf[raw_pos + 2] & 0x3FU);
             } else if (seq_len == 4 && raw_pos + 3 < raw_n) {
                 /* Consume all 4 bytes even though we will map to '?' */
-                cp = 0x10000U; /* beyond BMP -> will become '?' */
+                cp = 0x0080U; /* beyond BMP -> will become '?' */
             } else {
                 /* Invalid or incomplete; treat lead as a single unknown */
                 cp = '?';
@@ -409,67 +395,6 @@ int read_page(ReaderState *rs, char *buf) {
                 break;
             }
             continue;
-        }
-
-        /* Lookahead for word fit if starting a new word */
-        if (ch != ' ' && (line_len == 0 || *(out - 1) == ' ')) {
-            int temp_pos = raw_pos - seq_len;  /* start from current ch */
-            int word_len = 0;
-            while (temp_pos < raw_n) {
-                unsigned char tlead = (unsigned char)raw_buf[temp_pos];
-                int tseq = 1;
-                unsigned int tcp = 0;
-                char tch = 0;
-                if (enc == 0) {
-                    tseq = utf8_lead_len(tlead);
-                    if (tseq == 1) {
-                        tcp = tlead;
-                    } else if (tseq == 2 && temp_pos + 1 < raw_n) {
-                        tcp = ((tlead & 0x1FU) << 6) |
-                              ((unsigned char)raw_buf[temp_pos + 1] & 0x3FU);
-                    } else if (tseq == 3 && temp_pos + 2 < raw_n) {
-                        tcp = ((tlead & 0x0FU) << 12) |
-                              (((unsigned char)raw_buf[temp_pos + 1] & 0x3FU) << 6) |
-                              ((unsigned char)raw_buf[temp_pos + 2] & 0x3FU);
-                    } else if (tseq == 4 && temp_pos + 3 < raw_n) {
-                        tcp = 0x10000U;
-                    } else {
-                        tcp = '?';
-                        tseq = 1;
-                    }
-                    tch = unicode_to_ascii(tcp);
-                } else if (enc == 1) {
-                    tch = (tlead < 0x80U) ? (char)tlead : (char)cp1250_to_ascii[tlead - 128];
-                } else {
-                    tch = (char)tlead;
-                }
-                if (tch == ' ' || tch == '\n' || tch == '\r') break;
-                word_len++;
-                temp_pos += tseq;
-            }
-            if (word_len > line_width - line_len) {
-                /* Word doesn't fit in remaining space */
-                if (num_lines < page_lines - 1) {
-                    /* Can wrap to new line */
-                    line_start = out - line_len;
-                    last_space = NULL;
-                    for (p = line_start; p < out; ++p) {
-                        if (*p == ' ') last_space = p;
-                    }
-                    if (last_space) {
-                        *last_space = '\n';
-                        num_lines++;
-                        line_len = (int)(out - (last_space + 1));
-                        continue;  /* Don't add ch yet, it will be added on new line */
-                    }
-                    /* If no space (long word at line start), fall through to add */
-                } else {
-                    /* Can't wrap (last line of page), don't start word */
-                    raw_pos -= seq_len;
-                    raw_used -= seq_len;
-                    break;
-                }
-            }
         }
 
         /* Wrap if current line is already full before adding this char */
@@ -521,11 +446,21 @@ int read_page(ReaderState *rs, char *buf) {
     /* Advance file offset by used raw bytes */
     rs->offset += raw_used;
 
-    /* Save any leftover raw bytes for next page */
+    /* Save any leftover raw bytes for next page, then append any clipped
+       UTF-8 trailer.  The trailer belongs AFTER the leftover bytes in file
+       order, so the next read reassembles it correctly instead of
+       re-reading (and duplicating) those bytes. */
     if (raw_pos < raw_n) {
         leftover_len = raw_n - raw_pos;
         if (leftover_len > RAW_BUF_SIZE) leftover_len = RAW_BUF_SIZE; /* clamp */
         memcpy(leftover, raw_buf + raw_pos, leftover_len);
+    }
+    if (utf8_edge_len > 0) {
+        if (leftover_len + utf8_edge_len <= RAW_BUF_SIZE) {
+            memcpy(leftover + leftover_len, utf8_edge, utf8_edge_len);
+            leftover_len += utf8_edge_len;
+        }
+        utf8_edge_len = 0;
     }
 
     /* Update expected next offset */

@@ -1,5 +1,7 @@
 /* ui.c
-   Note: Changes are annotated with "CHANGED" comments near the modified/added lines.
+   @mod: ui
+   @breadcrumb: ui/input
+   Keyboard input: translates key presses into reader commands.
 */
 
 #include "95read.h"
@@ -14,17 +16,21 @@
     N/P/C  -> next/prev/quit (or runtime-configured values, case-insensitive)
     B/E    -> begin/end
     G      -> goto percentage prompt
-    I      -> invert colors (case-insensitive)              // CHANGED: documented explicitly
-    T      -> open inversion test screen (case-insensitive) // CHANGED: added T support
+    I      -> invert colors (case-insensitive)              // @note: documented explicitly
+    T      -> open inversion test screen (case-insensitive) // @note: added T support
     Arrows/Home/End/PgUp/PgDn -> intuitive navigation
   Ignores all other keys (including other extended keys).
 */
 
+/* @region: input
+   @breadcrumb: ui/my_toupper */
 static unsigned char my_toupper(unsigned char c) {
     if (c >= 'a' && c <= 'z') return c - ('a' - 'A');
     return c;
 }
 
+/* @region: input
+   @breadcrumb: ui/ui_get_cmd */
 char ui_get_cmd(void) {
     int c;  /* must be int to catch all getch() return values */
 
@@ -98,7 +104,7 @@ char ui_get_cmd(void) {
             return 'I';
         }
 
-        /* CHANGED: inversion test command (case-insensitive) */
+        /* @note: inversion test command (case-insensitive) */
         if (my_toupper((unsigned char)c) == 'T') {
             return 'T';
         }

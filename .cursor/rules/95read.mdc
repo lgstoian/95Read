@@ -1,0 +1,19 @@
+---
+description: 95read project conventions for AI coding agents
+globs: **/*.{c,h}
+alwaysApply: true
+---
+
+# 95read agent conventions
+
+- **Toolchain**: Turbo C 2.01, small model, ANSI C89. Declare variables at
+  the start of a block; avoid C99+ constructs.
+- **Line endings**: source files must use CRLF. Turbo C 2.01 silently compiles
+  an LF-only file as an empty translation unit.
+- **File names**: DOS 8.3 names only (no long filenames).
+- **Breadcrumbs**: add machine-readable inline tags — `@mod`, `@region`,
+  `@breadcrumb`, `@note`. See `BREADCRUMBS.md` for the index and convention.
+- **No debug instrumentation**: do not add logging/`agent_log_*` code. Use the
+  test harness in `tests/tmain.c` instead.
+- **Build/test**: `scripts\build.ps1` and `scripts\test.ps1` run everything
+  inside DOSBox (the 16-bit tools cannot run on 64-bit Windows).
