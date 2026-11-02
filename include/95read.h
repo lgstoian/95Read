@@ -52,6 +52,21 @@
 #ifndef KEY_GOTO
   #define KEY_GOTO       'G'   /* prompt for percent and jump */
 #endif
+#ifndef KEY_FIND
+  #define KEY_FIND       'F'   /* find/search for text */
+#endif
+#ifndef KEY_HELP
+  #define KEY_HELP       'H'   /* help screen */
+#endif
+#ifndef KEY_GOTO_LINE
+  #define KEY_GOTO_LINE  'J'   /* jump to line number */
+#endif
+#ifndef KEY_RELOAD
+  #define KEY_RELOAD     'R'   /* reload from beginning */
+#endif
+#ifndef KEY_QUIT2
+  #define KEY_QUIT2      'Q'   /* alternative quit key */
+#endif
 
 /*--------------------------------------------------------------------
   User overrides and config structure
@@ -99,10 +114,14 @@
     (TO_UPPER(c) == TO_UPPER(cfg.key_invert)) \
 )
 
-/* compile-time only helpers for begin/end/goto */
+/* compile-time only helpers for begin/end/goto/find/help/jump/reload */
 #define IS_KEY_BEGIN(c) ( ((c) == KEY_BEGIN) )
 #define IS_KEY_END(c)  ( ((c) == KEY_END) )
 #define IS_KEY_GOTO(c)  ( ((c) == KEY_GOTO) )
+#define IS_KEY_FIND(c)  ( ((c) == KEY_FIND) )
+#define IS_KEY_HELP(c)  ( ((c) == KEY_HELP) )
+#define IS_KEY_GOTO_LINE(c)  ( ((c) == KEY_GOTO_LINE) )
+#define IS_KEY_RELOAD(c)  ( ((c) == KEY_RELOAD) )
 
 /*--------------------------------------------------------------------
   Effective dimensions if needed by other modules:
@@ -125,6 +144,8 @@
 /*--------------------------------------------------------------------
   Reader state shared across modules
 --------------------------------------------------------------------*/
+#define MAX_SEARCH_LEN 40
+
 typedef struct {
     FILE *fp;                   /* open input file */
     long  file_size;            /* total bytes in file */
@@ -135,6 +156,12 @@ typedef struct {
     int   hist_capacity;        /* how many allocated */
 
     char  progfile_base[80];    /* base filename for .95r file */
+
+    /* search state */
+    char  search_str[MAX_SEARCH_LEN];
+    int   search_len;
+    int   search_active;
+    long  search_last_pos;      /* last position where found */
 } ReaderState;
 
 /*--------------------------------------------------------------------

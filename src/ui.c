@@ -77,6 +77,29 @@ char ui_get_cmd(void) {
             return cfg.key_quit;
         }
 
+        /* compile-time extra commands: Begin/End/Goto/Find/Help/Jump/Reload (case-insensitive) */
+        if (my_toupper((unsigned char)c) == KEY_BEGIN) {
+            return KEY_BEGIN;
+        }
+        if (my_toupper((unsigned char)c) == KEY_END) {
+            return KEY_END;
+        }
+        if (my_toupper((unsigned char)c) == KEY_GOTO) {
+            return KEY_GOTO;
+        }
+        if (my_toupper((unsigned char)c) == KEY_FIND) {
+            return KEY_FIND;
+        }
+        if (my_toupper((unsigned char)c) == KEY_HELP) {
+            return KEY_HELP;
+        }
+        if (my_toupper((unsigned char)c) == KEY_GOTO_LINE) {
+            return KEY_GOTO_LINE;
+        }
+        if (my_toupper((unsigned char)c) == KEY_RELOAD) {
+            return KEY_RELOAD;
+        }
+
         /* user-configured keys for next/prev/quit (case-insensitive) */
         if (my_toupper((unsigned char)c) == my_toupper((unsigned char)cfg.key_next_page)) {
             return cfg.key_next_page;
@@ -87,16 +110,8 @@ char ui_get_cmd(void) {
         if (my_toupper((unsigned char)c) == my_toupper((unsigned char)cfg.key_quit)) {
             return cfg.key_quit;
         }
-
-        /* compile-time extra commands: Begin/End/Goto (case-insensitive) */
-        if (my_toupper((unsigned char)c) == KEY_BEGIN) {
-            return KEY_BEGIN;
-        }
-        if (my_toupper((unsigned char)c) == KEY_END) {
-            return KEY_END;
-        }
-        if (my_toupper((unsigned char)c) == KEY_GOTO) {
-            return KEY_GOTO;
+        if (my_toupper((unsigned char)c) == 'Q') {
+            return cfg.key_quit;
         }
 
         /* invert colors (case-insensitive) */

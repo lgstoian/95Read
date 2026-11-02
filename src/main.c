@@ -81,9 +81,9 @@ static void draw_status(const ReaderState *rs, int inverted) {
     build_breadcrumb(rs, trail, sizeof(trail));
 
     if (cols >= 48) {
-        legend = "N:Next P:Prev G:Goto B:Begin E:End I:Invert T:Test C:Quit";
+        legend = "N:Next P:Prev G:Goto J:Line B:Begin E:End F:Find H:Help I:Invert T:Test C:Quit";
     } else {
-        legend = "N/P G B E I T C";
+        legend = "N/P G J B E F H I T C";
     }
 
     /* Compose: [pct% mode] <trail> <legend>, truncated to the visible width. */
@@ -104,6 +104,27 @@ static void draw_status(const ReaderState *rs, int inverted) {
     /* Ensure we never exceed the visible width (avoid wrap/overwrite) */
     if (cols > 0 && (int)strlen(line) > cols) {
         line[cols] = '\0';
+    }
+
+    /* Show search indicator if active */
+    if (rs->search_active && rs->search_len > 0 && cols >= 20) {
+        char sline[32];
+        sprintf(sline, " [F:%s]", rs->search_str);
+        if ((int)strlen(line) + (int)strlen(sline) < cols) {
+            strcat(line, sline);
+        } else if ((int)strlen(line) < cols - 4) {
+            /* truncate search string */
+            int slen = cols - (int)strlen(line) - 5;
+            if (slen < 1) slen = 1;
+            if (slen > MAX_SEARCH_LEN - 1) slen = MAX_SEARCH_LEN - 1;
+            line[strlen(line)] = ' ';
+            line[strlen(line)] = '[';
+            line[strlen(line)] = 'F';
+            line[strlen(line)] = ':';
+            memcpy(line + strlen(line), rs->search_str, slen);
+            line[strlen(line)] = ']';
+            line[strlen(line)] = '\0';
+        }
     }
 
     /* Draw on last line */
@@ -164,6 +185,169 @@ static int read_percent_prompt(void) {
     }
 
     return val;
+}
+
+/*---------------------------------------------------------------
+  @region: prompt
+  @breadcrumb: main/read_search_prompt
+  Read a search string from keyboard.
+  - Uses getch() only (no stdio buffering).
+  - Echoes chars, supports backspace, Enter to accept, ESC to cancel.
+  - Returns 1 if a search string was entered, 0 if cancelled.
+---------------------------------------------------------------*/
+static int read_search_prompt(ReaderState *rs) {
+    int ch;
+    int idx = 0;
+
+    /* Prompt on last line */
+    cprintf("Find: ");
+    rs->search_str[0] = '\0';
+    rs->search_len = 0;
+
+    while (1) {
+        ch = getch();
+
+        /* Enter accepts */
+        if (ch == '\r' || ch == '\n') {
+            if (idx == 0) {
+                /* empty search, cancel */
+                putch('\r');
+                clreol();
+                return 0;
+            }
+            rs->search_str[idx] = '\0';
+            rs->search_len = idx;
+            rs->search_active = 1;
+            rs->search_last_pos = -1L;
+            putch('\r');
+            clreol();
+            return 1;
+        }
+
+        /* ESC cancels */
+        if (ch == 27) {
+            putch('\r');
+            clreol();
+            return 0;
+        }
+
+        /* Backspace */
+        if (ch == 8) {
+            if (idx > 0) {
+                putch('\b'); putch(' '); putch('\b');
+                idx--;
+            }
+            continue;
+        }
+
+        /* Accept printable chars */
+        if (ch >= 32 && ch < 127 && idx < MAX_SEARCH_LEN - 1) {
+            rs->search_str[idx++] = (char)ch;
+            putch((char)ch);
+        }
+        /* Ignore others */
+    }
+}
+
+/*---------------------------------------------------------------
+  @region: prompt
+  @breadcrumb: main/read_line_prompt
+  Read a small integer line number from keyboard.
+  - Uses getch() only (no stdio buffering).
+  - Echoes digits, supports backspace, Enter to accept, ESC to cancel.
+  - Returns value >=1 or -1 on cancel.
+---------------------------------------------------------------*/
+static int read_line_prompt(void) {
+    int ch;
+    long val = 0;
+    int digits = 0;
+
+    cprintf("Goto line: ");
+    while (1) {
+        ch = getch();
+
+        if (ch == '\r' || ch == '\n') {
+            if (digits == 0) {
+                putch('\r');
+                clreol();
+                return -1;
+            }
+            putch('\r');
+            clreol();
+            if (val < 1) val = 1;
+            return (int)val;
+        }
+
+        if (ch == 27) {
+            putch('\r');
+            clreol();
+            return -1;
+        }
+
+        if (ch == 8) {
+            if (digits > 0) {
+                putch('\b'); putch(' '); putch('\b');
+                val /= 10;
+                digits--;
+            }
+            continue;
+        }
+
+        if (ch >= '0' && ch <= '9') {
+            if (digits < 6) {
+                int d = ch - '0';
+                long new_val = val * 10 + d;
+                if (new_val <= 1000000) {
+                    val = new_val;
+                    digits++;
+                    putch((char)ch);
+                }
+            }
+            continue;
+        }
+    }
+}
+
+/*---------------------------------------------------------------
+  @region: help
+  @breadcrumb: main/show_help
+  Show help screen.
+---------------------------------------------------------------*/
+static void show_help(void) {
+    struct text_info ti;
+    int orig_attr;
+
+    gettextinfo(&ti);
+    orig_attr = ti.attribute;
+
+    reset_fullscreen_viewport();
+    textattr(ATTR_NORMAL);
+    clrscr();
+
+    print_line_trunc(1, 1, "95Read - Help");
+    print_line_trunc(1, 2, "");
+    print_line_trunc(1, 3, "N/Space/Enter  Next page");
+    print_line_trunc(1, 4, "P/BS/PgUp/Left  Prev page");
+    print_line_trunc(1, 5, "B/Home          Begin");
+    print_line_trunc(1, 6, "E/End           End");
+    print_line_trunc(1, 7, "G               Goto %%");
+    print_line_trunc(1, 8, "J               Goto line");
+    print_line_trunc(1, 9, "F               Find");
+    print_line_trunc(1, 10, "N               Find next (after F)");
+    print_line_trunc(1, 11, "R               Reload from start");
+    print_line_trunc(1, 12, "I               Invert colors");
+    print_line_trunc(1, 13, "T               Test screen");
+    print_line_trunc(1, 14, "H               This help");
+    print_line_trunc(1, 15, "C/Q/ESC         Quit");
+
+    gotoxy(1, 16);
+    cprintf("Press any key to return...");
+
+    getch();
+
+    window(ti.winleft, ti.wintop, ti.winright, ti.winbottom);
+    textattr(orig_attr);
+    apply_video_attr(orig_attr == ATTR_INVERT ? 1 : 0);
 }
 
 /* @region: test-screen
@@ -230,6 +414,104 @@ static void show_invert_test(int *pinverted) {
     apply_video_attr(*pinverted);
 }
 
+/*---------------------------------------------------------------
+  @region: search
+  @breadcrumb: main/find_next
+  Search forward for search string from current position.
+  Returns 1 if found and sets rs->offset, 0 if not found.
+---------------------------------------------------------------*/
+static int find_next(ReaderState *rs) {
+    char buf[512];
+    long pos;
+    long start_pos;
+    int found = 0;
+    long found_pos = -1L;
+    size_t slen;
+    int i;
+
+    if (!rs->search_active || rs->search_len == 0 || !rs->search_str[0]) {
+        return 0;
+    }
+
+    slen = (size_t)rs->search_len;
+    if (slen == 0) return 0;
+
+    /* Start search from current position */
+    start_pos = rs->offset;
+    if (rs->search_last_pos >= 0 && rs->search_last_pos == start_pos) {
+        /* If we just searched here, start after */
+        start_pos = rs->offset + 1;
+        if (start_pos > rs->file_size) start_pos = 0;
+    }
+
+    /* Search from start_pos to end of file */
+    for (pos = start_pos; pos < rs->file_size && !found; pos++) {
+        /* Read a window */
+        if (fseek(rs->fp, pos, SEEK_SET) != 0) break;
+        if (fread(buf, 1, 511, rs->fp) == 0) break;
+        buf[511] = '\0';
+
+        /* Simple case-insensitive search */
+        for (i = 0; i < 511 - (int)slen && !found; i++) {
+            int match = 1;
+            int j;
+            for (j = 0; j < (int)slen; j++) {
+                char c1 = buf[i + j];
+                char c2 = rs->search_str[j];
+                /* Case insensitive */
+                if (c1 >= 'a' && c1 <= 'z') c1 = c1 - ('a' - 'A');
+                if (c2 >= 'a' && c2 <= 'z') c2 = c2 - ('a' - 'A');
+                if (c1 != c2) {
+                    match = 0;
+                    break;
+                }
+            }
+            if (match) {
+                found = 1;
+                found_pos = pos + i;
+                break;
+            }
+        }
+    }
+
+    /* If not found from start_pos to end, wrap around from beginning */
+    if (!found && start_pos > 0) {
+        for (pos = 0; pos < start_pos && !found; pos++) {
+            if (fseek(rs->fp, pos, SEEK_SET) != 0) break;
+            if (fread(buf, 1, 511, rs->fp) == 0) break;
+            buf[511] = '\0';
+
+            for (i = 0; i < 511 - (int)slen && !found; i++) {
+                int match = 1;
+                int j;
+                for (j = 0; j < (int)slen; j++) {
+                    char c1 = buf[i + j];
+                    char c2 = rs->search_str[j];
+                    if (c1 >= 'a' && c1 <= 'z') c1 = c1 - ('a' - 'A');
+                    if (c2 >= 'a' && c2 <= 'z') c2 = c2 - ('a' - 'A');
+                    if (c1 != c2) {
+                        match = 0;
+                        break;
+                    }
+                }
+                if (match) {
+                    found = 1;
+                    found_pos = pos + i;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (found && found_pos >= 0) {
+        rs->offset = found_pos;
+        rs->search_last_pos = found_pos;
+        return 1;
+    }
+
+    return 0;
+}
+
 /* @region: main-loop
    @breadcrumb: main/main */
 int main(int argc, char **argv) {
@@ -249,6 +531,10 @@ int main(int argc, char **argv) {
     rs.file_size     = 0L;
     rs.offset        = 0L;
     rs.progfile_base[0] = '\0';
+    rs.search_str[0] = '\0';
+    rs.search_len    = 0;
+    rs.search_active = 0;
+    rs.search_last_pos = -1L;
 
     load_config();
 
@@ -308,7 +594,7 @@ int main(int argc, char **argv) {
         cmd = ui_get_cmd();
 
         /* quit */
-        if (IS_KEY_QUIT(cmd)) {
+        if (IS_KEY_QUIT(cmd) || cmd == 'Q' || cmd == 'q') {
             break;
         }
         /* previous page (go back to prior saved offset) */
@@ -363,6 +649,68 @@ int main(int argc, char **argv) {
                 rs.offset = 0L;
             }
         }
+        /* find/search */
+        else if (cmd == 'F' || cmd == 'f') {
+            int row;
+            int found;
+
+            /* Ensure fullscreen viewport for absolute positioning of the prompt */
+            reset_fullscreen_viewport();
+
+            /* place prompt on last line */
+            row = (EFF_SCREEN_LINES > 0) ? EFF_SCREEN_LINES : SCREEN_LINES;
+            gotoxy(1, row);
+            clreol();
+            if (read_search_prompt(&rs)) {
+                found = find_next(&rs);
+                if (!found) {
+                    /* Show not found message briefly */
+                    gotoxy(1, row);
+                    clreol();
+                    cprintf("Not found: %s", rs.search_str);
+                    /* small delay */
+                    { int k = 0; for (k = 0; k < 1000; k++); }
+                }
+            }
+        }
+        /* goto line */
+        else if (cmd == 'J' || cmd == 'j') {
+            int row;
+            int line_num;
+            long line = 0;
+            long pos = 0;
+            int ch;
+
+            reset_fullscreen_viewport();
+            row = (EFF_SCREEN_LINES > 0) ? EFF_SCREEN_LINES : SCREEN_LINES;
+            gotoxy(1, row);
+            clreol();
+            line_num = read_line_prompt();
+            if (line_num > 0) {
+                fseek(rs.fp, 0L, SEEK_SET);
+                line = 1;
+                pos = 0;
+                while (line < line_num && pos < rs.file_size) {
+                    ch = fgetc(rs.fp);
+                    if (ch == EOF) break;
+                    if (ch == '\n') {
+                        line++;
+                    }
+                    pos++;
+                }
+                if (pos >= rs.file_size) pos = 0;
+                rs.offset = pos;
+                if (rs.fp) fseek(rs.fp, rs.offset, SEEK_SET);
+            }
+        }
+        /* reload from beginning */
+        else if (cmd == 'R' || cmd == 'r') {
+            rs.offset = 0L;
+        }
+        /* help */
+        else if (cmd == 'H' || cmd == 'h') {
+            show_help();
+        }
         /* @note: Add test screen command (non-destructive) */
         else if (cmd == 'T' || cmd == 't') {
             /* Show the test screen; allow toggling inversion inside it.
@@ -377,9 +725,20 @@ int main(int argc, char **argv) {
                 rs.offset = rs.history[rs.hist_count - 1];
             }
         }
-        /* next page (default) */
+        /* next page or next search result */
         else if (IS_KEY_NEXT(cmd)) {
-            /* nothing; offset already advanced by read_page */
+            if (rs.search_active && rs.search_len > 0) {
+                int found = find_next(&rs);
+                if (!found) {
+                    int row = (EFF_SCREEN_LINES > 0) ? EFF_SCREEN_LINES : SCREEN_LINES;
+                    reset_fullscreen_viewport();
+                    gotoxy(1, row);
+                    clreol();
+                    cprintf("Not found: %s", rs.search_str);
+                    { int k = 0; for (k = 0; k < 500; k++); }
+                }
+            }
+            /* else nothing; offset already advanced by read_page */
         }
         /* ignore unknown keys: reset offset to redraw current page */
         else {
